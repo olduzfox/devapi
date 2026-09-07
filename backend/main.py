@@ -100,10 +100,10 @@ async def create_payment(
 
     current_time = time.time()
 
-    # 10 daqiqadan eski "pending" to'lovlarni tozalaymiz (cancel holatiga o'tkazamiz)
+    # 20 daqiqadan (1200 soniya) eski "pending" to'lovlarni cancel holatiga o'tkazamiz
     pending_payments = db.query(Payment).filter(Payment.status == "pending").all()
     for p in pending_payments:
-        if current_time - p.created_at > 600:
+        if current_time - p.created_at > 1200:
             p.status = "cancel"
     db.commit()
 
@@ -203,8 +203,8 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
         }
 
     current_time = time.time()
-    # 10 daqiqa limit
-    if current_time - payment.created_at > 600 and payment.status == "pending":
+    # 20 daqiqa limit (1200 soniya)
+    if current_time - payment.created_at > 1200 and payment.status == "pending":
         payment.status = "cancel"
         db.commit()
 
