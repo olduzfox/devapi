@@ -113,7 +113,9 @@ class TelegramManager:
 
                 db: Session = SessionLocal()
                 try:
-                    sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                    sess = db.query(TGSession).filter(
+                        (TGSession.phone == phone) | (TGSession.phone == phone.replace("+", ""))
+                    ).first()
                     if not sess:
                         sess = TGSession(
                             store_id=store_id,
@@ -125,6 +127,7 @@ class TelegramManager:
                         )
                         db.add(sess)
                     else:
+                        sess.phone = phone
                         if store_id:
                             sess.store_id = store_id
                         sess.session_string = session_str
@@ -141,21 +144,21 @@ class TelegramManager:
         except Exception:
             pass
 
-        # 60 sec timeout check
-        if time.time() - qr_data["created_at"] > 90:
+        # 300 sec (5 min) timeout check
+        if time.time() - qr_data["created_at"] > 300:
             try:
                 await client.disconnect()
             except Exception:
                 pass
             if token_id in self.pending_qr_logins:
                 del self.pending_qr_logins[token_id]
-            return {"status": "expired", "message": "QR kod vaqti tugadi. Iltimos qayta yangilang."}
+            return {"status": "expired", "message": "QR kod vaqti tugadi. Qayta yangilanmoqda..."}
 
         try:
-            user = await asyncio.wait_for(qr_login.wait(), timeout=1.0)
+            user = await asyncio.wait_for(qr_login.wait(), timeout=0.8)
             session_str = client.session.save()
             me = await client.get_me()
-            phone = self.clean_phone(me.phone) if me and me.phone else f"+{user.id}"
+            phone = self.clean_phone(me.phone) if me and me.phone else f"+User_{user.id}"
 
             if token_id in self.pending_qr_logins:
                 del self.pending_qr_logins[token_id]
@@ -164,7 +167,9 @@ class TelegramManager:
 
             db: Session = SessionLocal()
             try:
-                sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                sess = db.query(TGSession).filter(
+                    (TGSession.phone == phone) | (TGSession.phone == phone.replace("+", ""))
+                ).first()
                 if not sess:
                     sess = TGSession(
                         store_id=store_id,
@@ -176,6 +181,7 @@ class TelegramManager:
                     )
                     db.add(sess)
                 else:
+                    sess.phone = phone
                     if store_id:
                         sess.store_id = store_id
                     sess.session_string = session_str
@@ -190,7 +196,11 @@ class TelegramManager:
                 "message": f"Telegram sessiyasi ({phone}) QR kod orqali muvaffaqiyatli ulandi!",
             }
         except asyncio.TimeoutError:
-            return {"status": "pending", "message": "QR kod skan qilinishi kutilmoqda..."}
+            return {
+                "status": "pending",
+                "url": getattr(qr_login, "url", None),
+                "message": "QR kod skan qilinishi kutilmoqda...",
+            }
         except SessionPasswordNeededError:
             if password:
                 try:
@@ -206,9 +216,12 @@ class TelegramManager:
 
                     db: Session = SessionLocal()
                     try:
-                        sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                        sess = db.query(TGSession).filter(
+                            (TGSession.phone == phone) | (TGSession.phone == phone.replace("+", ""))
+                        ).first()
                         if not sess:
                             sess = TGSession(
+                                store_id=store_id,
                                 phone=phone,
                                 api_id=api_id,
                                 api_hash=api_hash,
@@ -217,6 +230,9 @@ class TelegramManager:
                             )
                             db.add(sess)
                         else:
+                            sess.phone = phone
+                            if store_id:
+                                sess.store_id = store_id
                             sess.session_string = session_str
                             sess.status = "active"
                         db.commit()

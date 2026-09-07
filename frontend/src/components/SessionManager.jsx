@@ -37,6 +37,13 @@ export default function SessionManager() {
     fetchSessions();
   }, [activeStore]);
 
+  // Auto-start QR login when mode switches to 'qr'
+  useEffect(() => {
+    if (mode === 'qr' && !qrTokenId && !qrLoading) {
+      handleStartQr();
+    }
+  }, [mode]);
+
   // Poll QR status when QR active
   useEffect(() => {
     let interval = null;
@@ -194,13 +201,16 @@ export default function SessionManager() {
         setQr2faRequired(false);
         setMode('sms'); // Switch back and show sessions
         fetchSessions(); // Refresh list
+      } else if (data.status === 'pending') {
+        if (data.url && data.url !== qrUrl) {
+          setQrUrl(data.url);
+        }
       } else if (data.status === '2fa_required') {
         setQr2faRequired(true);
         setQrStatusText('2FA Parol talab etiladi.');
       } else if (data.status === 'expired') {
-        setError('QR kod vaqti tugadi. Qayta yangilang.');
-        setQrTokenId('');
-        setQrUrl('');
+        // Auto regenerate QR code seamlessly
+        handleStartQr();
       } else if (data.status === '2fa_error') {
         setError(data.message);
       }
