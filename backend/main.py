@@ -109,8 +109,12 @@ async def create_payment(
     # Active kartalarni bazadan olamiz
     active_cards = db.query(Card).filter(Card.is_active == True).all()
 
-    # Agar kartalar ro'yxati bo'sh bo'lsa, default rejimda ishlaydi (karta tekshirilmaydi)
+    # Agar kartalar ro'yxati bo'sh bo'lsa, default rejimda ishlaydi
     if not active_cards:
+        # 🔥 MUHIM LOGIKA: Agar ayni shu summa "pending" bo'lsa, +100 so'm qo'shamiz!
+        while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
+            amt += 100
+
         new_payment = Payment(
             payment_id=payment_id,
             amount=amt,
@@ -145,12 +149,11 @@ async def create_payment(
             assigned_card = card
             break
 
-    # Agar barcha kartalarda aynan shu summa bo'yicha to'lov allaqachon kutilayotgan bo'lsa
+    # Agar barcha kartalarda ham bor bo'lsa, miqdorga +100 so'm qo'shib karta biriktiramiz
     if not assigned_card:
-        raise HTTPException(
-            status_code=400,
-            detail="Barcha kartalarda ushbu miqdor bo'yicha to'lov kutilmoqda. Iltimos, boshqa miqdor kiriting.",
-        )
+        while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
+            amt += 100
+        assigned_card = active_cards[0]
 
     new_payment = Payment(
         payment_id=payment_id,
