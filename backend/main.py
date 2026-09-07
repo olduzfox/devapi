@@ -577,17 +577,20 @@ async def list_sessions(
         query = db.query(TGSession)
         
         if sid:
-            query = query.filter((TGSession.store_id == sid) | (TGSession.store_id == None))
+            query = query.filter(TGSession.store_id == sid)
         elif user:
             user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
             if user_store_ids:
-                query = query.filter((TGSession.store_id.in_(user_store_ids)) | (TGSession.store_id == None))
+                query = query.filter(TGSession.store_id.in_(user_store_ids))
 
         sessions = query.all()
+        stores_map = {st.id: st.name for st in db.query(Store).all()}
+
         return [
             {
                 "id": s.id,
                 "store_id": getattr(s, "store_id", None),
+                "store_name": stores_map.get(getattr(s, "store_id", None), "Umumiy / Biriktirilmagan"),
                 "phone": s.phone,
                 "api_id": s.api_id,
                 "status": s.status,
@@ -598,10 +601,12 @@ async def list_sessions(
     except Exception as ex:
         print(f"[List Sessions Exception]: {ex}")
         sessions = db.query(TGSession).all()
+        stores_map = {st.id: st.name for st in db.query(Store).all()}
         return [
             {
                 "id": s.id,
                 "store_id": getattr(s, "store_id", None),
+                "store_name": stores_map.get(getattr(s, "store_id", None), "Umumiy / Biriktirilmagan"),
                 "phone": s.phone,
                 "api_id": s.api_id,
                 "status": s.status,
@@ -609,6 +614,17 @@ async def list_sessions(
             }
             for s in sessions
         ]
+
+
+@app.post("/sessions/{session_id}/bind")
+@app.post("/api/sessions/{session_id}/bind")
+async def bind_session(session_id: int, store_id: int = Body(..., embed=True), db: Session = Depends(get_db)):
+    sess = db.query(TGSession).filter(TGSession.id == session_id).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Sessiya topilmadi")
+    sess.store_id = store_id
+    db.commit()
+    return {"status": "ok", "message": "Sessiya do'konga muvaffaqiyatli biriktirildi"}
 
 
 @app.delete("/sessions/{session_id}")

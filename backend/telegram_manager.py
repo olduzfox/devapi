@@ -366,12 +366,12 @@ class TelegramManager:
         @client.on(events.NewMessage(from_users="humocardbot"))
         async def humocard_handler(event):
             text = event.raw_text
-            await self.process_telegram_message(text)
+            await self.process_telegram_message(text, phone=phone)
 
-    async def process_telegram_message(self, text: str):
+    async def process_telegram_message(self, text: str, phone: Optional[str] = None):
         """Core parser for Telegram payment messages (humocardbot format)."""
         try:
-            print(f"[Telegram Message Received]:\n{text.encode('ascii', errors='backslashreplace').decode('ascii')}")
+            print(f"[Telegram Message Received from {phone}]:\n{text.encode('ascii', errors='backslashreplace').decode('ascii')}")
         except Exception:
             pass
 
@@ -387,7 +387,19 @@ class TelegramManager:
 
         db: Session = SessionLocal()
         try:
-            pending_payments = db.query(Payment).filter(Payment.status == "pending").all()
+            query = db.query(Payment).filter(Payment.status == "pending")
+
+            # Store isolation check
+            if phone:
+                sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                if sess and sess.store_id:
+                    store_payments = query.filter(Payment.store_id == sess.store_id).all()
+                    pending_payments = store_payments if store_payments else query.all()
+                else:
+                    pending_payments = query.all()
+            else:
+                pending_payments = query.all()
+
             matched = False
 
             for p in pending_payments:

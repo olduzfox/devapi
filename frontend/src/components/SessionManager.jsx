@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink, Store } from 'lucide-react';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink, Store, Link2 } from 'lucide-react';
 
 export default function SessionManager() {
   const { activeStore } = useAuth();
@@ -262,7 +262,7 @@ export default function SessionManager() {
   };
 
   const handleDeleteSession = async (id) => {
-    if (!confirm('Sessiyani o`chirmoqchimisiz?')) return;
+    if (!confirm('Sessiyani o`chirmoqchimisiz? Telegram monitoring to`xtatiladi.')) return;
     try {
       const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -273,38 +273,78 @@ export default function SessionManager() {
     }
   };
 
+  const handleBindSession = async (sessionId) => {
+    if (!activeStore) return;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/bind`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: activeStore.id })
+      });
+      if (res.ok) {
+        fetchSessions();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-          <h2 className="text-xl font-bold text-blue-400 flex items-center gap-2">
-            <Smartphone className="w-5 h-5" /> Telegram Sessiyasini Ulash (Telethon)
-          </h2>
+      {/* Active Store Banner */}
+      {activeStore ? (
+        <div className="bg-gradient-to-r from-blue-950/60 to-gray-850 border border-blue-600/50 rounded-2xl p-4 flex items-center justify-between shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-600/30 border border-blue-500/50 rounded-xl text-blue-400">
+              <Store className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs text-blue-300 font-semibold uppercase tracking-wider">Tanlangan Do'kon</div>
+              <div className="text-base font-bold text-white">{activeStore.name}</div>
+            </div>
+          </div>
+          <div className="text-xs font-mono bg-blue-950 border border-blue-700/60 text-blue-200 px-3 py-1.5 rounded-xl font-semibold">
+            Sessiya aynan shunga biriktiriladi
+          </div>
+        </div>
+      ) : (
+        <div className="bg-amber-950/50 border border-amber-800/80 rounded-2xl p-4 text-xs text-amber-200">
+          ⚠️ Do'kon tanlanmagan. Iltimos yuqoridagi menyudan do'koningizni tanlang!
+        </div>
+      )}
 
-          <div className="flex bg-gray-900 p-1 rounded-lg border border-gray-700 text-xs flex-wrap gap-1">
+      {/* Main Connect Panel */}
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-700 pb-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-blue-400" /> Telegram Sessiyasini Ulash (Telethon)
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">Har bir do'kon uchun alohida Telegram sessiya biriktiriladi</p>
+          </div>
+
+          {/* Mode Switcher */}
+          <div className="flex bg-gray-900 p-1 rounded-xl border border-gray-700/80 text-xs">
             <button
               onClick={() => setMode('sms')}
-              className={`px-3 py-1.5 rounded-md font-medium transition ${
-                mode === 'sms' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+              className={`px-3 py-1.5 font-semibold rounded-lg transition ${
+                mode === 'sms' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'
               }`}
             >
               SMS / App Kod
             </button>
             <button
-              onClick={() => {
-                setMode('qr');
-                if (!qrUrl) handleStartQr();
-              }}
-              className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1 ${
-                mode === 'qr' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+              onClick={() => setMode('qr')}
+              className={`px-3 py-1.5 font-semibold rounded-lg transition ${
+                mode === 'qr' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'
               }`}
             >
-              <QrCode className="w-3.5 h-3.5" /> QR Kod bilan (100%)
+              QR Kod bilan (100%)
             </button>
             <button
               onClick={() => setMode('string_session')}
-              className={`px-3 py-1.5 rounded-md font-medium transition ${
-                mode === 'string_session' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+              className={`px-3 py-1.5 font-semibold rounded-lg transition ${
+                mode === 'string_session' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'
               }`}
             >
               StringSession
@@ -312,31 +352,32 @@ export default function SessionManager() {
           </div>
         </div>
 
+        {/* Global Feedback Messages */}
         {error && (
-          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 text-red-200 rounded-lg flex items-center gap-2 text-sm">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <div className="p-4 bg-red-950/60 border border-red-800 text-red-200 rounded-xl text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
             <span>{error}</span>
           </div>
         )}
 
         {success && (
-          <div className="mb-4 p-3 bg-green-900/50 border border-green-700 text-green-200 rounded-lg flex items-center gap-2 text-sm">
-            <CheckCircle className="w-5 h-5 flex-shrink-0" />
+          <div className="p-4 bg-green-950/60 border border-green-800 text-green-200 rounded-xl text-xs flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 flex-shrink-0 text-green-400" />
             <span>{success}</span>
           </div>
         )}
 
-        {/* MODE 1: SMS / APP CODE */}
+        {/* MODE 1: SMS / APP OTP */}
         {mode === 'sms' && (
           <>
             {step === 1 && (
               <form onSubmit={(e) => handleSendCode(e, false)} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">Telegram Telefon Raqamingiz</label>
-                  <div className="flex gap-3">
+                  <div className="flex gap-2">
                     <input
                       type="text"
-                      className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white font-mono text-lg focus:outline-none focus:border-blue-500"
+                      className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-mono focus:outline-none focus:border-blue-500"
                       placeholder="+998901234567"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
@@ -345,7 +386,7 @@ export default function SessionManager() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 transition disabled:opacity-50"
                     >
                       {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                       Kodni Yuborish
@@ -354,66 +395,67 @@ export default function SessionManager() {
                 </div>
 
                 <div className="pt-2">
-                  <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={useCustomApi}
                       onChange={(e) => setUseCustomApi(e.target.checked)}
                       className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-500"
                     />
-                    <span>O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)</span>
+                    O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)
                   </label>
-
-                  {useCustomApi && (
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-300 mb-1">API ID</label>
-                        <input
-                          type="number"
-                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono"
-                          value={apiId}
-                          onChange={(e) => setApiId(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-300 mb-1">API Hash</label>
-                        <input
-                          type="text"
-                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono"
-                          value={apiHash}
-                          onChange={(e) => setApiHash(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
+
+                {useCustomApi && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-900 rounded-xl border border-gray-700">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-400 mb-1">API ID</label>
+                      <input
+                        type="text"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                        value={apiId}
+                        onChange={(e) => setApiId(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-400 mb-1">API HASH</label>
+                      <input
+                        type="text"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                        value={apiHash}
+                        onChange={(e) => setApiHash(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
               </form>
             )}
 
             {step === 2 && (
               <form onSubmit={handleLogin} className="space-y-4">
+                <div className="p-3 bg-blue-950/50 border border-blue-800 text-blue-200 rounded-xl text-xs flex justify-between items-center">
+                  <span>Telegram ilovangizga (SMS) 5 xonali kod yuborildi!</span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSendCode(e, true)}
+                    className="text-xs text-blue-400 hover:text-blue-300 underline font-semibold"
+                  >
+                    SMS Orqali Qayta Yuborish
+                  </button>
+                </div>
+
                 <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block text-sm font-medium text-gray-300">Telegram SMS/App Kod</label>
-                    <button
-                      type="button"
-                      onClick={() => handleSendCode(null, true)}
-                      className="text-xs text-blue-400 hover:text-blue-300 underline"
-                    >
-                      SMS orqali qayta yuborish (Force SMS)
-                    </button>
-                  </div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">SMS / App Tasdiqlash Kodi</label>
                   <input
                     type="text"
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-xl tracking-widest text-center focus:outline-none focus:border-green-500"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-mono text-lg tracking-widest focus:outline-none focus:border-blue-500"
                     placeholder="12345"
-                    maxLength={6}
+                    maxLength={10}
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                     required
-                    autoFocus
                   />
                 </div>
 
@@ -428,10 +470,10 @@ export default function SessionManager() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="bg-green-600 hover:bg-green-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 transition disabled:opacity-50"
                   >
                     {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
-                    Sessiyani Tasdiqlash
+                    Sessiyani Boshlash
                   </button>
                 </div>
               </form>
@@ -439,21 +481,19 @@ export default function SessionManager() {
 
             {step === 3 && (
               <form onSubmit={handleLogin} className="space-y-4">
-                <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-yellow-400" />
-                  <span>Hisobingizda 2-bosqichli xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting.</span>
+                <div className="p-3 bg-yellow-950/50 border border-yellow-800 text-yellow-200 rounded-xl text-xs">
+                  Hisobingizda 2-Bosqichli Xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting:
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">2FA Parol</label>
                   <input
                     type="password"
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500"
-                    placeholder="2FA Parolingiz"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 font-mono"
+                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    autoFocus
                   />
                 </div>
 
@@ -468,10 +508,10 @@ export default function SessionManager() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="bg-yellow-600 hover:bg-yellow-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                    className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 transition disabled:opacity-50"
                   >
                     {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    2FA Parol Bilan Kirish
+                    2FA Bilan Kirish
                   </button>
                 </div>
               </form>
@@ -489,7 +529,7 @@ export default function SessionManager() {
               </div>
             ) : qrUrl ? (
               <>
-                <div className="p-4 bg-white rounded-2xl shadow-xl inline-block border-4 border-blue-500/50">
+                <div className="p-4 bg-white rounded-2xl shadow-2xl inline-block border-4 border-blue-500/50">
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}`}
                     alt="Telegram QR Login"
@@ -498,12 +538,12 @@ export default function SessionManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-white flex items-center justify-center gap-2">
+                  <p className="text-sm font-bold text-white flex items-center justify-center gap-2">
                     <QrCode className="w-4 h-4 text-blue-400" />
                     Telegram Ilovangizda QR Kodni Skan Qiling
                   </p>
                   <p className="text-xs text-gray-400">
-                    Smarfoningizda: <strong className="text-blue-300">Settings → Devices → Link Desktop Device</strong>
+                    Smartfoningizda: <strong className="text-blue-300">Settings → Devices → Link Desktop Device</strong>
                   </p>
                 </div>
 
@@ -512,26 +552,26 @@ export default function SessionManager() {
                     href={qrUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-lg flex items-center gap-1 transition"
+                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-xl flex items-center gap-1 transition font-medium"
                   >
                     <ExternalLink className="w-3.5 h-3.5" /> Telegram Ilovasida Ochish
                   </a>
                   <button
                     onClick={handleStartQr}
-                    className="text-xs text-blue-400 hover:text-blue-300 underline"
+                    className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1"
                   >
-                    QR Kodni Yangilash
+                    <RefreshCw className="w-3.5 h-3.5" /> QR Kodni Yangilash
                   </button>
                 </div>
 
                 {qr2faRequired && (
                   <form onSubmit={handleQr2faSubmit} className="w-full max-w-sm pt-4 space-y-3">
-                    <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs">
+                    <div className="p-3 bg-yellow-950/50 border border-yellow-800 rounded-xl text-yellow-200 text-xs">
                       2FA Parolingizni kiriting:
                     </div>
                     <input
                       type="password"
-                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-yellow-500 text-sm"
+                      className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-yellow-500 text-sm"
                       placeholder="2FA Parolingiz"
                       value={qrPassword}
                       onChange={(e) => setQrPassword(e.target.value)}
@@ -539,7 +579,7 @@ export default function SessionManager() {
                     />
                     <button
                       type="submit"
-                      className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-medium py-2 rounded-lg text-sm transition"
+                      className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded-xl text-sm transition"
                     >
                       2FA Bilan Tasdiqlash
                     </button>
@@ -549,7 +589,7 @@ export default function SessionManager() {
             ) : (
               <button
                 onClick={handleStartQr}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 transition"
               >
                 <QrCode className="w-4 h-4" /> QR Kod Yaratish
               </button>
@@ -565,7 +605,7 @@ export default function SessionManager() {
                 <label className="block text-sm font-medium text-gray-300 mb-1">Telefon Raqam</label>
                 <input
                   type="text"
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white font-mono"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-mono"
                   placeholder="+998901234567"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
@@ -576,7 +616,7 @@ export default function SessionManager() {
                 <label className="block text-sm font-medium text-gray-300 mb-1">StringSession Kodingiz</label>
                 <input
                   type="text"
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white font-mono text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm"
                   placeholder="1BJW9... (Telethon StringSession)"
                   value={sessionStringInput}
                   onChange={(e) => setSessionStringInput(e.target.value)}
@@ -589,7 +629,7 @@ export default function SessionManager() {
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 transition disabled:opacity-50"
               >
                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />}
                 StringSession Ulash
@@ -600,33 +640,62 @@ export default function SessionManager() {
       </div>
 
       {/* Active Sessions List */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-white">Faol Telegram Sessiyalari</h3>
-          <button onClick={fetchSessions} className="text-gray-400 hover:text-white p-1">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 shadow-xl">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-white">Faol Telegram Sessiyalari</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {activeStore ? `"${activeStore.name}" do'koniga biriktirilgan sessiyalar` : "Barcha sessiyalar ro'yxati"}
+            </p>
+          </div>
+          <button onClick={fetchSessions} className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-gray-700">
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
 
         {sessions.length === 0 ? (
-          <p className="text-gray-400 text-sm">Hozircha ulangan Telegram sessiyasi mavjud emas.</p>
+          <div className="text-center py-8 text-gray-400 text-sm">
+            Hozircha ulangan Telegram sessiyasi mavjud emas. Yuqoridagi bo'limdan sessiya ulang!
+          </div>
         ) : (
-          <div className="divide-y divide-gray-700">
+          <div className="grid grid-cols-1 gap-3">
             {sessions.map((s) => (
-              <div key={s.id} className="py-3 flex items-center justify-between">
+              <div
+                key={s.id}
+                className="bg-gray-900 border border-gray-700/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
                 <div>
-                  <span className="font-mono text-blue-300 font-semibold">{s.phone}</span>
-                  <span className="ml-3 text-xs px-2 py-0.5 rounded-full bg-green-900/60 text-green-300 border border-green-700">
-                    {s.status.toUpperCase()}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-lg font-bold text-white">{s.phone}</span>
+                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full bg-green-950 text-green-300 border border-green-700">
+                      {s.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-blue-300 flex items-center gap-1 mt-1 font-medium">
+                    <Store className="w-3.5 h-3.5 text-blue-400" />
+                    Do'kon: <strong>{s.store_name}</strong>
+                  </div>
                 </div>
-                <button
-                  onClick={() => handleDeleteSession(s.id)}
-                  className="text-red-400 hover:text-red-300 p-2 rounded-lg hover:bg-gray-700 transition"
-                  title="Sessiyani o'chirish"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  {activeStore && s.store_id !== activeStore.id && (
+                    <button
+                      onClick={() => handleBindSession(s.id)}
+                      className="bg-blue-950/60 hover:bg-blue-900 text-blue-300 border border-blue-700 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition"
+                      title="Ushbu sessiyani tanlangan do'konga biriktirish"
+                    >
+                      <Link2 className="w-3.5 h-3.5" /> Do'konga Biriktirish
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => handleDeleteSession(s.id)}
+                    className="bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/60 p-2 rounded-xl transition"
+                    title="Sessiyani o'chirish"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
