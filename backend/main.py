@@ -69,6 +69,11 @@ class ImportSessionReq(BaseModel):
     session_string: str
 
 
+class QRCheckReq(BaseModel):
+    token_id: str
+    password: Optional[str] = None
+
+
 class CardReq(BaseModel):
     name: str
     card_number: str
@@ -292,6 +297,29 @@ async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(g
 
         db.commit()
         return {"status": "ok", "message": "StringSession orqali sessiya muvaffaqiyatli faollashtirildi!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# --------------------------------------------------------
+# QR Code Login Endpoints
+# --------------------------------------------------------
+@app.post("/sessions/qr/start")
+@app.post("/api/sessions/qr/start")
+async def qr_start_endpoint():
+    try:
+        data = await telegram_manager.start_qr_login()
+        return {"status": "ok", **data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/sessions/qr/check")
+@app.post("/api/sessions/qr/check")
+async def qr_check_endpoint(req: QRCheckReq):
+    try:
+        result = await telegram_manager.check_qr_login(req.token_id, req.password)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

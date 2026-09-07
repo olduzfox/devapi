@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import asyncio
 import re
 import time
+import secrets
+import string
 from typing import Dict, Optional
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -17,7 +19,6 @@ from models import TGSession, Payment, Card
 OFFICIAL_API_ID = 6
 OFFICIAL_API_HASH = "eb066357cf9304d306f0509f3015b7ae"
 
-# Fallback developer credentials
 FALLBACK_API_ID = 24511179
 FALLBACK_API_HASH = "ac098d8c9f90857f2c443302d86a7288"
 
@@ -26,6 +27,7 @@ class TelegramManager:
     def __init__(self):
         self.clients: Dict[str, TelegramClient] = {}
         self.pending_logins: Dict[str, TelegramClient] = {}
+        self.pending_qr_logins: Dict[str, dict] = {}
 
     def clean_phone(self, phone: str) -> str:
         cleaned = re.sub(r"[^\d+]", "", phone.strip())
@@ -45,13 +47,143 @@ class TelegramManager:
             system_lang_code="en",
         )
 
+    # --------------------------------------------------------
+    # QR Code Login Flow
+    # --------------------------------------------------------
+    async def start_qr_login(self) -> dict:
+        """Starts a QR code login session and returns QR URL and token_id."""
+        alphabet = string.ascii_letters + string.digits
+        token_id = "".join(secrets.choice(alphabet) for _ in range(12))
+
+        client = self._create_client(StringSession(), OFFICIAL_API_ID, OFFICIAL_API_HASH)
+        await client.connect()
+
+        try:
+            qr_login = await client.qr_login()
+            self.pending_qr_logins[token_id] = {
+                "client": client,
+                "qr_login": qr_login,
+                "created_at": time.time(),
+            }
+            print(f"[TelegramManager] QR Login started, token_id={token_id}, url={qr_login.url}")
+            return {
+                "token_id": token_id,
+                "url": qr_login.url,
+                "expires_in": 60,
+            }
+        except Exception as e:
+            await client.disconnect()
+            raise ValueError(f"QR Kod yaratishda xatolik: {str(e)}")
+
+    async def check_qr_login(self, token_id: str, password: Optional[str] = None) -> dict:
+        """Checks status of QR login session."""
+        if token_id not in self.pending_qr_logins:
+            return {"status": "expired", "message": "QR kod vaqti tugadi yoki topilmadi."}
+
+        qr_data = self.pending_qr_logins[token_id]
+        client: TelegramClient = qr_data["client"]
+        qr_login = qr_data["qr_login"]
+
+        # 60 sec timeout check
+        if time.time() - qr_data["created_at"] > 60:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            del self.pending_qr_logins[token_id]
+            return {"status": "expired", "message": "QR kod vaqti tugadi. Iltimos qayta yangilang."}
+
+        try:
+            # Check if user scanned QR code
+            user = await asyncio.wait_for(qr_login.wait(), timeout=1.5)
+            # Login successful!
+            session_str = client.session.save()
+            me = await client.get_me()
+            phone = self.clean_phone(me.phone) if me and me.phone else f"+{user.id}"
+
+            del self.pending_qr_logins[token_id]
+            await self._attach_handler_and_start(phone, client)
+
+            # Save to DB
+            db: Session = SessionLocal()
+            try:
+                sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                if not sess:
+                    sess = TGSession(
+                        phone=phone,
+                        api_id=OFFICIAL_API_ID,
+                        api_hash=OFFICIAL_API_HASH,
+                        session_string=session_str,
+                        status="active",
+                    )
+                    db.add(sess)
+                else:
+                    sess.session_string = session_str
+                    sess.status = "active"
+                db.commit()
+            finally:
+                db.close()
+
+            return {
+                "status": "authorized",
+                "phone": phone,
+                "message": f"Telegram sessiyasi ({phone}) QR kod orqali muvaffaqiyatli ulandi!",
+            }
+        except asyncio.TimeoutError:
+            return {"status": "pending", "message": "QR kod skan qilinishi kutilmoqda..."}
+        except SessionPasswordNeededError:
+            if password:
+                try:
+                    await client.sign_in(password=password.strip())
+                    session_str = client.session.save()
+                    me = await client.get_me()
+                    phone = self.clean_phone(me.phone) if me and me.phone else "+2FAUser"
+
+                    del self.pending_qr_logins[token_id]
+                    await self._attach_handler_and_start(phone, client)
+
+                    db: Session = SessionLocal()
+                    try:
+                        sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                        if not sess:
+                            sess = TGSession(
+                                phone=phone,
+                                api_id=OFFICIAL_API_ID,
+                                api_hash=OFFICIAL_API_HASH,
+                                session_string=session_str,
+                                status="active",
+                            )
+                            db.add(sess)
+                        else:
+                            sess.session_string = session_str
+                            sess.status = "active"
+                        db.commit()
+                    finally:
+                        db.close()
+
+                    return {
+                        "status": "authorized",
+                        "phone": phone,
+                        "message": f"Telegram sessiyasi ({phone}) QR kod va 2FA parol orqali ulandi!",
+                    }
+                except Exception as ex:
+                    return {"status": "2fa_error", "message": f"2FA Parol noto'g'ri: {str(ex)}"}
+            else:
+                return {"status": "2fa_required", "message": "2FA Parol talab etiladi."}
+        except Exception as e:
+            if "password" in str(e).lower() or "2fa" in str(e).lower():
+                return {"status": "2fa_required", "message": "2FA Parol talab etiladi."}
+            return {"status": "error", "message": str(e)}
+
+    # --------------------------------------------------------
+    # Phone OTP Login Flow
+    # --------------------------------------------------------
     async def send_code(self, phone: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, force_sms: bool = False) -> str:
-        """Sends OTP code to ANY Telegram phone number using official app credentials."""
+        """Sends OTP code to ANY Telegram phone number."""
         phone = self.clean_phone(phone)
         use_api_id = api_id or OFFICIAL_API_ID
         use_api_hash = api_hash or OFFICIAL_API_HASH
 
-        # Clean old pending client if exists
         if phone in self.pending_logins:
             try:
                 await self.pending_logins[phone].disconnect()
@@ -69,7 +201,6 @@ class TelegramManager:
             return res.phone_code_hash
         except Exception as e:
             await client.disconnect()
-            # If official credentials blocked, retry with fallback developer credentials
             if not api_id and use_api_id == OFFICIAL_API_ID:
                 print(f"[TelegramManager] Retrying send_code with fallback API_ID {FALLBACK_API_ID}")
                 return await self.send_code(phone, api_id=FALLBACK_API_ID, api_hash=FALLBACK_API_HASH, force_sms=force_sms)
@@ -112,7 +243,6 @@ class TelegramManager:
         if phone in self.pending_logins:
             del self.pending_logins[phone]
 
-        # Attach message handler and activate
         await self._attach_handler_and_start(phone, client)
         return session_str
 

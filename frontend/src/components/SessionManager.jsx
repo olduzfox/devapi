@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, Settings } from 'lucide-react';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink } from 'lucide-react';
 
 export default function SessionManager() {
   const [sessions, setSessions] = useState([]);
@@ -7,7 +7,7 @@ export default function SessionManager() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Mode: 'sms' or 'string_session'
+  // Mode: 'sms', 'qr', 'string_session'
   const [mode, setMode] = useState('sms');
 
   // Custom API ID / Hash Toggle
@@ -15,7 +15,7 @@ export default function SessionManager() {
   const [apiId, setApiId] = useState('24511179');
   const [apiHash, setApiHash] = useState('ac098d8c9f90857f2c443302d86a7288');
 
-  // Form State
+  // SMS Form State
   const [phone, setPhone] = useState('+998');
   const [step, setStep] = useState(1); // 1: Send Code, 2: Enter OTP Code, 3: Enter 2FA Password
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
@@ -23,9 +23,28 @@ export default function SessionManager() {
   const [password, setPassword] = useState('');
   const [sessionStringInput, setSessionStringInput] = useState('');
 
+  // QR Code Login State
+  const [qrTokenId, setQrTokenId] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrStatusText, setQrStatusText] = useState('');
+  const [qr2faRequired, setQr2faRequired] = useState(false);
+  const [qrPassword, setQrPassword] = useState('');
+
   useEffect(() => {
     fetchSessions();
   }, []);
+
+  // Poll QR status when QR active
+  useEffect(() => {
+    let interval = null;
+    if (mode === 'qr' && qrTokenId && !qr2faRequired) {
+      interval = setInterval(() => {
+        checkQrStatus();
+      }, 2000);
+    }
+    return () => clearInterval(interval);
+  }, [mode, qrTokenId, qr2faRequired]);
 
   const fetchSessions = async () => {
     try {
@@ -39,6 +58,7 @@ export default function SessionManager() {
     }
   };
 
+  // SMS Handlers
   const handleSendCode = async (e, forceSms = false) => {
     if (e) e.preventDefault();
     setError('');
@@ -107,7 +127,7 @@ export default function SessionManager() {
 
       if (data.status === '2fa_required') {
         setError(data.message);
-        setStep(3); // Move to 2FA password step
+        setStep(3);
         return;
       }
 
@@ -123,6 +143,71 @@ export default function SessionManager() {
     }
   };
 
+  // QR Code Handlers
+  const handleStartQr = async () => {
+    setError('');
+    setSuccess('');
+    setQrLoading(true);
+    setQrTokenId('');
+    setQrUrl('');
+    setQr2faRequired(false);
+    setQrPassword('');
+
+    try {
+      const res = await fetch('/api/sessions/qr/start', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'QR kod yaratishda xatolik');
+
+      setQrTokenId(data.token_id);
+      setQrUrl(data.url);
+      setQrStatusText('Telegram ilovangizda (Settings -> Devices -> Link Desktop Device) skan qiling...');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const checkQrStatus = async (pass = null) => {
+    if (!qrTokenId) return;
+    try {
+      const res = await fetch('/api/sessions/qr/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token_id: qrTokenId,
+          password: pass || (qrPassword ? qrPassword.trim() : null),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.status === 'authorized') {
+        setSuccess(data.message);
+        setQrTokenId('');
+        setQrUrl('');
+        setQr2faRequired(false);
+        fetchSessions();
+      } else if (data.status === '2fa_required') {
+        setQr2faRequired(true);
+        setQrStatusText('2FA Parol talab etiladi.');
+      } else if (data.status === 'expired') {
+        setError('QR kod vaqti tugadi. Qayta yangilang.');
+        setQrTokenId('');
+        setQrUrl('');
+      } else if (data.status === '2fa_error') {
+        setError(data.message);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleQr2faSubmit = (e) => {
+    e.preventDefault();
+    checkQrStatus(qrPassword);
+  };
+
+  // StringSession Handler
   const handleImportStringSession = async (e) => {
     e.preventDefault();
     setError('');
@@ -178,14 +263,25 @@ export default function SessionManager() {
             <Smartphone className="w-5 h-5" /> Telegram Sessiyasini Ulash (Telethon)
           </h2>
 
-          <div className="flex bg-gray-900 p-1 rounded-lg border border-gray-700 text-xs">
+          <div className="flex bg-gray-900 p-1 rounded-lg border border-gray-700 text-xs flex-wrap gap-1">
             <button
               onClick={() => setMode('sms')}
               className={`px-3 py-1.5 rounded-md font-medium transition ${
                 mode === 'sms' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
-              SMS / App Kod bilan
+              SMS / App Kod
+            </button>
+            <button
+              onClick={() => {
+                setMode('qr');
+                if (!qrUrl) handleStartQr();
+              }}
+              className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1 ${
+                mode === 'qr' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" /> QR Kod bilan (100%)
             </button>
             <button
               onClick={() => setMode('string_session')}
@@ -193,7 +289,7 @@ export default function SessionManager() {
                 mode === 'string_session' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
-              StringSession bilan
+              StringSession
             </button>
           </div>
         </div>
@@ -212,9 +308,9 @@ export default function SessionManager() {
           </div>
         )}
 
-        {mode === 'sms' ? (
+        {/* MODE 1: SMS / APP CODE */}
+        {mode === 'sms' && (
           <>
-            {/* STEP 1: Enter Phone Number */}
             {step === 1 && (
               <form onSubmit={(e) => handleSendCode(e, false)} className="space-y-4">
                 <div>
@@ -239,7 +335,6 @@ export default function SessionManager() {
                   </div>
                 </div>
 
-                {/* Optional Custom API Credentials Accordion */}
                 <div className="pt-2">
                   <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200">
                     <input
@@ -248,7 +343,6 @@ export default function SessionManager() {
                       onChange={(e) => setUseCustomApi(e.target.checked)}
                       className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-500"
                     />
-                    <Settings className="w-3.5 h-3.5 text-gray-400" />
                     <span>O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)</span>
                   </label>
 
@@ -280,7 +374,6 @@ export default function SessionManager() {
               </form>
             )}
 
-            {/* STEP 2: Enter Telegram SMS/App Code */}
             {step === 2 && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
@@ -326,7 +419,6 @@ export default function SessionManager() {
               </form>
             )}
 
-            {/* STEP 3: Enter 2FA Password */}
             {step === 3 && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs flex items-center gap-2">
@@ -367,8 +459,89 @@ export default function SessionManager() {
               </form>
             )}
           </>
-        ) : (
-          /* StringSession Import Mode */
+        )}
+
+        {/* MODE 2: QR CODE SCAN */}
+        {mode === 'qr' && (
+          <div className="flex flex-col items-center justify-center py-4 space-y-4 text-center">
+            {qrLoading ? (
+              <div className="flex flex-col items-center py-8">
+                <RefreshCw className="w-8 h-8 text-blue-400 animate-spin mb-3" />
+                <p className="text-sm text-gray-300">QR Kod generatsiya qilinmoqda...</p>
+              </div>
+            ) : qrUrl ? (
+              <>
+                <div className="p-4 bg-white rounded-2xl shadow-xl inline-block border-4 border-blue-500/50">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}`}
+                    alt="Telegram QR Login"
+                    className="w-60 h-60"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-white flex items-center justify-center gap-2">
+                    <QrCode className="w-4 h-4 text-blue-400" />
+                    Telegram Ilovangizda QR Kodni Skan Qiling
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Smarfoningizda: <strong className="text-blue-300">Settings → Devices → Link Desktop Device</strong>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <a
+                    href={qrUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded-lg flex items-center gap-1 transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Telegram Ilovasida Ochish
+                  </a>
+                  <button
+                    onClick={handleStartQr}
+                    className="text-xs text-blue-400 hover:text-blue-300 underline"
+                  >
+                    QR Kodni Yangilash
+                  </button>
+                </div>
+
+                {/* 2FA Prompt during QR login if needed */}
+                {qr2faRequired && (
+                  <form onSubmit={handleQr2faSubmit} className="w-full max-w-sm pt-4 space-y-3">
+                    <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs">
+                      2FA Parolingizni kiriting:
+                    </div>
+                    <input
+                      type="password"
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-yellow-500 text-sm"
+                      placeholder="2FA Parolingiz"
+                      value={qrPassword}
+                      onChange={(e) => setQrPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-medium py-2 rounded-lg text-sm transition"
+                    >
+                      2FA Bilan Tasdiqlash
+                    </button>
+                  </form>
+                )}
+              </>
+            ) : (
+              <button
+                onClick={handleStartQr}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition"
+              >
+                <QrCode className="w-4 h-4" /> QR Kod Yaratish
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* MODE 3: STRING SESSION IMPORT */}
+        {mode === 'string_session' && (
           <form onSubmit={handleImportStringSession} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
