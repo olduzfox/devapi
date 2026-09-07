@@ -228,6 +228,7 @@ async def list_payments(db: Session = Depends(get_db)):
 # --------------------------------------------------------
 # Sessions Management Endpoints
 # --------------------------------------------------------
+@app.post("/sessions/send-code")
 @app.post("/api/sessions/send-code")
 async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
     try:
@@ -256,6 +257,7 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/sessions/login")
 @app.post("/api/sessions/login")
 async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
     try:
@@ -277,6 +279,7 @@ async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/sessions")
 @app.get("/api/sessions")
 async def list_sessions(db: Session = Depends(get_db)):
     sessions = db.query(TGSession).all()
@@ -292,6 +295,7 @@ async def list_sessions(db: Session = Depends(get_db)):
     ]
 
 
+@app.delete("/sessions/{session_id}")
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: int, db: Session = Depends(get_db)):
     sess = db.query(TGSession).filter(TGSession.id == session_id).first()
@@ -307,12 +311,14 @@ async def delete_session(session_id: int, db: Session = Depends(get_db)):
 # --------------------------------------------------------
 # Cards Management Endpoints
 # --------------------------------------------------------
+@app.get("/cards")
 @app.get("/api/cards")
 async def list_cards(db: Session = Depends(get_db)):
     cards = db.query(Card).filter(Card.is_active == True).all()
     return cards
 
 
+@app.post("/cards")
 @app.post("/api/cards")
 async def add_card(card: CardReq, db: Session = Depends(get_db)):
     clean_num = card.card_number.strip()
@@ -326,6 +332,7 @@ async def add_card(card: CardReq, db: Session = Depends(get_db)):
     return {"status": "ok", "card": new_card}
 
 
+@app.delete("/cards/{card_id}")
 @app.delete("/api/cards/{card_id}")
 async def delete_card(card_id: int, db: Session = Depends(get_db)):
     card = db.query(Card).filter(Card.id == card_id).first()
