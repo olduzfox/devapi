@@ -29,9 +29,24 @@ class TelegramManager:
             cleaned = "+" + cleaned
         return cleaned
 
-    async def send_code(self, phone: str, force_sms: bool = False) -> str:
+    def _create_client(self, session, api_id: int, api_hash: str):
+        """Creates a Telethon TelegramClient with official desktop parameters to ensure SMS code delivery."""
+        return TelegramClient(
+            session,
+            api_id,
+            api_hash,
+            device_model="Desktop",
+            system_version="Windows 11",
+            app_version="4.16.3 x64",
+            lang_code="en",
+            system_lang_code="en",
+        )
+
+    async def send_code(self, phone: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, force_sms: bool = False) -> str:
         """Sends OTP code to Telegram phone number."""
         phone = self.clean_phone(phone)
+        use_api_id = api_id or DEFAULT_API_ID
+        use_api_hash = api_hash or DEFAULT_API_HASH
 
         # Clean old pending client if exists
         if phone in self.pending_logins:
@@ -41,13 +56,13 @@ class TelegramManager:
                 pass
             del self.pending_logins[phone]
 
-        client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+        client = self._create_client(StringSession(), use_api_id, use_api_hash)
         await client.connect()
         
         try:
             res = await client.send_code_request(phone, force_sms=force_sms)
             self.pending_logins[phone] = client
-            print(f"[TelegramManager] Code requested (force_sms={force_sms}) for {phone}")
+            print(f"[TelegramManager] Code requested for {phone} (api_id={use_api_id})")
             return res.phone_code_hash
         except Exception as e:
             await client.disconnect()
@@ -55,15 +70,17 @@ class TelegramManager:
             if "FLOOD_WAIT" in err_msg:
                 wait_sec = re.findall(r"\d+", err_msg)
                 sec = wait_sec[0] if wait_sec else "60"
-                raise ValueError(f"Telegram ushbu raqamga juda ko'p so'rov yuborilgani uchun {sec} soniya cheklov qo'ydi. Iltimos {sec} soniyadan keyin qayta urining.")
+                raise ValueError(f"Telegram ushbu raqamga {sec} soniya cheklov qo'ydi. Iltimos {sec} soniyadan keyin qayta urining.")
             raise ValueError(f"Telegram kodini yuborishda xatolik: {err_msg}")
 
-    async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None) -> str:
+    async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> str:
         """Completes Telegram login and returns StringSession."""
         phone = self.clean_phone(phone)
+        use_api_id = api_id or DEFAULT_API_ID
+        use_api_hash = api_hash or DEFAULT_API_HASH
 
         if phone not in self.pending_logins:
-            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+            client = self._create_client(StringSession(), use_api_id, use_api_hash)
             await client.connect()
             self.pending_logins[phone] = client
         else:
@@ -91,10 +108,13 @@ class TelegramManager:
         await self._attach_handler_and_start(phone, client)
         return session_str
 
-    async def import_string_session(self, phone: str, session_str: str) -> bool:
+    async def import_string_session(self, phone: str, session_str: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> bool:
         """Imports an existing StringSession directly without SMS OTP."""
         phone = self.clean_phone(phone)
-        client = TelegramClient(StringSession(session_str.strip()), DEFAULT_API_ID, DEFAULT_API_HASH)
+        use_api_id = api_id or DEFAULT_API_ID
+        use_api_hash = api_hash or DEFAULT_API_HASH
+
+        client = self._create_client(StringSession(session_str.strip()), use_api_id, use_api_hash)
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
@@ -111,7 +131,7 @@ class TelegramManager:
             for s in sessions:
                 if s.session_string and s.phone not in self.clients:
                     try:
-                        client = TelegramClient(StringSession(s.session_string), s.api_id, s.api_hash)
+                        client = self._create_client(StringSession(s.session_string), s.api_id, s.api_hash)
                         await client.connect()
                         if await client.is_user_authorized():
                             await self._attach_handler_and_start(s.phone, client)

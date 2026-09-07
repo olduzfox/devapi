@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode } from 'lucide-react';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, Settings } from 'lucide-react';
 
 export default function SessionManager() {
   const [sessions, setSessions] = useState([]);
@@ -9,6 +9,11 @@ export default function SessionManager() {
 
   // Mode: 'sms' or 'string_session'
   const [mode, setMode] = useState('sms');
+
+  // Custom API ID / Hash Toggle
+  const [useCustomApi, setUseCustomApi] = useState(false);
+  const [apiId, setApiId] = useState('24511179');
+  const [apiHash, setApiHash] = useState('ac098d8c9f90857f2c443302d86a7288');
 
   // Form State
   const [phone, setPhone] = useState('+998');
@@ -47,6 +52,8 @@ export default function SessionManager() {
         body: JSON.stringify({
           phone: phone.trim(),
           force_sms: forceSms,
+          api_id: useCustomApi ? parseInt(apiId) : 24511179,
+          api_hash: useCustomApi ? apiHash.trim() : 'ac098d8c9f90857f2c443302d86a7288',
         }),
       });
 
@@ -84,6 +91,8 @@ export default function SessionManager() {
           code: code.trim(),
           phone_code_hash: phoneCodeHash,
           password: password.trim() || null,
+          api_id: useCustomApi ? parseInt(apiId) : 24511179,
+          api_hash: useCustomApi ? apiHash.trim() : 'ac098d8c9f90857f2c443302d86a7288',
         }),
       });
 
@@ -228,6 +237,45 @@ export default function SessionManager() {
                       Kodni Yuborish
                     </button>
                   </div>
+                </div>
+
+                {/* Optional Custom API Credentials Accordion */}
+                <div className="pt-2">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={useCustomApi}
+                      onChange={(e) => setUseCustomApi(e.target.checked)}
+                      className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-500"
+                    />
+                    <Settings className="w-3.5 h-3.5 text-gray-400" />
+                    <span>O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)</span>
+                  </label>
+
+                  {useCustomApi && (
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">API ID</label>
+                        <input
+                          type="number"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono"
+                          value={apiId}
+                          onChange={(e) => setApiId(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">API Hash</label>
+                        <input
+                          type="text"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono"
+                          value={apiHash}
+                          onChange={(e) => setApiHash(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </form>
             )}

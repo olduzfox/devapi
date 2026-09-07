@@ -241,7 +241,7 @@ from telethon.errors import SessionPasswordNeededError
 async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
     try:
         clean_p = telegram_manager.clean_phone(req.phone)
-        code_hash = await telegram_manager.send_code(clean_p, force_sms=bool(req.force_sms))
+        code_hash = await telegram_manager.send_code(clean_p, api_id=req.api_id, api_hash=req.api_hash, force_sms=bool(req.force_sms))
 
         sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if not sess:
@@ -254,6 +254,8 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
             )
             db.add(sess)
         else:
+            sess.api_id = req.api_id or sess.api_id or 24511179
+            sess.api_hash = req.api_hash or sess.api_hash or "ac098d8c9f90857f2c443302d86a7288"
             sess.status = "pending_code"
             sess.phone_code_hash = code_hash
 
