@@ -41,7 +41,7 @@ export default function SessionManager() {
     if (mode === 'qr' && qrTokenId && !qr2faRequired) {
       interval = setInterval(() => {
         checkQrStatus();
-      }, 2000);
+      }, 1500);
     }
     return () => clearInterval(interval);
   }, [mode, qrTokenId, qr2faRequired]);
@@ -186,7 +186,8 @@ export default function SessionManager() {
         setQrTokenId('');
         setQrUrl('');
         setQr2faRequired(false);
-        fetchSessions();
+        setMode('sms'); // Switch back and show sessions
+        fetchSessions(); // Refresh list
       } else if (data.status === '2fa_required') {
         setQr2faRequired(true);
         setQrStatusText('2FA Parol talab etiladi.');
@@ -506,7 +507,6 @@ export default function SessionManager() {
                   </button>
                 </div>
 
-                {/* 2FA Prompt during QR login if needed */}
                 {qr2faRequired && (
                   <form onSubmit={handleQr2faSubmit} className="w-full max-w-sm pt-4 space-y-3">
                     <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs">
