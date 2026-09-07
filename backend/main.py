@@ -14,13 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import engine, Base, get_db
+from database import engine, Base, get_db, auto_migrate_db
 from models import User, Store, TGSession, Card, Payment
 from auth_utils import hash_password, verify_password, create_access_token, decode_access_token, generate_api_key
 from telegram_manager import telegram_manager
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables & run column migrations
+auto_migrate_db()
 
 
 @asynccontextmanager
@@ -572,28 +572,43 @@ async def list_sessions(
     user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
-    sid = store_id or x_store_id
-    query = db.query(TGSession)
-    
-    if sid:
-        query = query.filter((TGSession.store_id == sid) | (TGSession.store_id == None))
-    elif user:
-        user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
-        if user_store_ids:
-            query = query.filter((TGSession.store_id.in_(user_store_ids)) | (TGSession.store_id == None))
+    try:
+        sid = store_id or x_store_id
+        query = db.query(TGSession)
+        
+        if sid:
+            query = query.filter((TGSession.store_id == sid) | (TGSession.store_id == None))
+        elif user:
+            user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
+            if user_store_ids:
+                query = query.filter((TGSession.store_id.in_(user_store_ids)) | (TGSession.store_id == None))
 
-    sessions = query.all()
-    return [
-        {
-            "id": s.id,
-            "store_id": s.store_id,
-            "phone": s.phone,
-            "api_id": s.api_id,
-            "status": s.status,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        }
-        for s in sessions
-    ]
+        sessions = query.all()
+        return [
+            {
+                "id": s.id,
+                "store_id": getattr(s, "store_id", None),
+                "phone": s.phone,
+                "api_id": s.api_id,
+                "status": s.status,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in sessions
+        ]
+    except Exception as ex:
+        print(f"[List Sessions Exception]: {ex}")
+        sessions = db.query(TGSession).all()
+        return [
+            {
+                "id": s.id,
+                "store_id": getattr(s, "store_id", None),
+                "phone": s.phone,
+                "api_id": s.api_id,
+                "status": s.status,
+                "created_at": s.created_at.isoformat() if getattr(s, "created_at", None) else None,
+            }
+            for s in sessions
+        ]
 
 
 @app.delete("/sessions/{session_id}")
