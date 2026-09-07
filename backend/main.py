@@ -52,8 +52,9 @@ app.add_middleware(
 # --------------------------------------------------------
 class SendCodeReq(BaseModel):
     phone: str
-    api_id: int = 24511179
-    api_hash: str = "ac098d8c9f90857f2c443302d86a7288"
+    force_sms: Optional[bool] = False
+    api_id: Optional[int] = 24511179
+    api_hash: Optional[str] = "ac098d8c9f90857f2c443302d86a7288"
 
 
 class LoginReq(BaseModel):
@@ -61,6 +62,11 @@ class LoginReq(BaseModel):
     code: str
     phone_code_hash: str
     password: Optional[str] = None
+
+
+class ImportSessionReq(BaseModel):
+    phone: str
+    session_string: str
 
 
 class CardReq(BaseModel):
@@ -235,7 +241,7 @@ from telethon.errors import SessionPasswordNeededError
 async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
     try:
         clean_p = telegram_manager.clean_phone(req.phone)
-        code_hash = await telegram_manager.send_code(clean_p)
+        code_hash = await telegram_manager.send_code(clean_p, force_sms=bool(req.force_sms))
 
         sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if not sess:
@@ -252,7 +258,35 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
             sess.phone_code_hash = code_hash
 
         db.commit()
-        return {"status": "ok", "message": "Telegram ilovangizga SMS kod yuborildi!", "phone_code_hash": code_hash, "phone": clean_p}
+        msg = "Telegram ilovangizga (SMS) kod yuborildi!" if req.force_sms else "Telegram ilovangizga (App/SMS) kod yuborildi!"
+        return {"status": "ok", "message": msg, "phone_code_hash": code_hash, "phone": clean_p}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/sessions/import-string")
+@app.post("/api/sessions/import-string")
+async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(get_db)):
+    try:
+        clean_p = telegram_manager.clean_phone(req.phone)
+        await telegram_manager.import_string_session(clean_p, req.session_string)
+
+        sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
+        if not sess:
+            sess = TGSession(
+                phone=clean_p,
+                api_id=24511179,
+                api_hash="ac098d8c9f90857f2c443302d86a7288",
+                session_string=req.session_string.strip(),
+                status="active",
+            )
+            db.add(sess)
+        else:
+            sess.session_string = req.session_string.strip()
+            sess.status = "active"
+
+        db.commit()
+        return {"status": "ok", "message": "StringSession orqali sessiya muvaffaqiyatli faollashtirildi!"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

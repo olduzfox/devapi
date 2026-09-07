@@ -29,8 +29,8 @@ class TelegramManager:
             cleaned = "+" + cleaned
         return cleaned
 
-    async def send_code(self, phone: str) -> str:
-        """Sends OTP code to the Telegram phone number using default API credentials."""
+    async def send_code(self, phone: str, force_sms: bool = False) -> str:
+        """Sends OTP code to Telegram phone number."""
         phone = self.clean_phone(phone)
 
         # Clean old pending client if exists
@@ -45,20 +45,24 @@ class TelegramManager:
         await client.connect()
         
         try:
-            res = await client.send_code_request(phone)
+            res = await client.send_code_request(phone, force_sms=force_sms)
             self.pending_logins[phone] = client
-            print(f"[TelegramManager] Code requested successfully for {phone}")
+            print(f"[TelegramManager] Code requested (force_sms={force_sms}) for {phone}")
             return res.phone_code_hash
         except Exception as e:
             await client.disconnect()
-            raise ValueError(f"Telegram kodini yuborishda xatolik: {str(e)}")
+            err_msg = str(e)
+            if "FLOOD_WAIT" in err_msg:
+                wait_sec = re.findall(r"\d+", err_msg)
+                sec = wait_sec[0] if wait_sec else "60"
+                raise ValueError(f"Telegram ushbu raqamga juda ko'p so'rov yuborilgani uchun {sec} soniya cheklov qo'ydi. Iltimos {sec} soniyadan keyin qayta urining.")
+            raise ValueError(f"Telegram kodini yuborishda xatolik: {err_msg}")
 
     async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None) -> str:
         """Completes Telegram login and returns StringSession."""
         phone = self.clean_phone(phone)
 
         if phone not in self.pending_logins:
-            # Try to recreate client connection
             client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
             await client.connect()
             self.pending_logins[phone] = client
@@ -86,6 +90,18 @@ class TelegramManager:
         # Attach message handler and activate
         await self._attach_handler_and_start(phone, client)
         return session_str
+
+    async def import_string_session(self, phone: str, session_str: str) -> bool:
+        """Imports an existing StringSession directly without SMS OTP."""
+        phone = self.clean_phone(phone)
+        client = TelegramClient(StringSession(session_str.strip()), DEFAULT_API_ID, DEFAULT_API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            raise ValueError("Berilgan StringSession yaroqsiz yoki avtorizatsiyadan o'tmagan.")
+
+        await self._attach_handler_and_start(phone, client)
+        return True
 
     async def load_active_sessions(self):
         """Loads and starts all active sessions from the database on startup."""
