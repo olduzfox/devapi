@@ -298,16 +298,20 @@ async def create_payment(
     alphabet = string.ascii_letters + string.digits
     payment_id = "".join(secrets.choice(alphabet) for _ in range(15))
 
-    # Active kartalarni bazadan olamiz (agar store biriktirilgan bo'lsa, store kartalari, aks holda barcha kartalar)
+    # Active kartalarni bazadan olamiz (faqat ushbu do'konga biriktirilgan kartalar)
     card_query = db.query(Card).filter(Card.is_active == True)
     if store:
-        store_cards = card_query.filter(Card.store_id == store.id).all()
-        active_cards = store_cards if store_cards else card_query.all()
+        active_cards = card_query.filter(Card.store_id == store.id).all()
     else:
-        active_cards = card_query.all()
+        active_cards = card_query.filter(Card.store_id == None).all()
 
+    # Agar do'konga karta kiritilmagan bo'lsa, to'lov card=null bo'lib yaratiladi
     if not active_cards:
-        while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
+        while db.query(Payment).filter(
+            Payment.amount == amt,
+            Payment.store_id == (store.id if store else None),
+            Payment.status == "pending"
+        ).first():
             amt += 100
 
         new_payment = Payment(
@@ -326,8 +330,8 @@ async def create_payment(
             "status": "ok",
             "payment_id": payment_id,
             "amount": amt,
-            "card": None,
             "card_number": None,
+            "card": None,
             "store": store.name if store else None,
             "message": "Payment created",
         }
@@ -347,7 +351,11 @@ async def create_payment(
             break
 
     if not assigned_card:
-        while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
+        while db.query(Payment).filter(
+            Payment.amount == amt,
+            Payment.store_id == (store.id if store else None),
+            Payment.status == "pending"
+        ).first():
             amt += 100
         assigned_card = active_cards[0]
 
