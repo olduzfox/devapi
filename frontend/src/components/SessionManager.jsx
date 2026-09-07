@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock } from 'lucide-react';
 
 export default function SessionManager() {
   const [sessions, setSessions] = useState([]);
@@ -7,13 +7,9 @@ export default function SessionManager() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Step 1 Form
+  // Form State
   const [phone, setPhone] = useState('+998');
-  const [apiId, setApiId] = useState('24511179');
-  const [apiHash, setApiHash] = useState('ac098d8c9f90857f2c443302d86a7288');
-
-  // Step 2 Form
-  const [step, setStep] = useState(1); // 1: Send code, 2: Enter code
+  const [step, setStep] = useState(1); // 1: Send Code, 2: Enter OTP Code, 3: Enter 2FA Password
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -46,15 +42,13 @@ export default function SessionManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phone: phone.trim(),
-          api_id: parseInt(apiId),
-          api_hash: apiHash.trim(),
         }),
       });
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         const text = await res.text();
-        throw new Error(`Server Xatosi (HTTP ${res.status}): Nginx yoki Backend xabari: ${text.substring(0, 150)}`);
+        throw new Error(`Server Xatosi (HTTP ${res.status}): ${text.substring(0, 150)}`);
       }
 
       const data = await res.json();
@@ -95,7 +89,13 @@ export default function SessionManager() {
       }
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Tasdiqlashda xatolik');
+      if (!res.ok && res.status >= 400) throw new Error(data.detail || 'Tasdiqlashda xatolik');
+
+      if (data.status === '2fa_required') {
+        setError(data.message);
+        setStep(3); // Move to 2FA password step
+        return;
+      }
 
       setSuccess('Telegram sessiyasi muvaffaqiyatli ulandi va monitoring ishga tushirildi!');
       setStep(1);
@@ -129,88 +129,61 @@ export default function SessionManager() {
         </h2>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 text-red-200 rounded-lg flex items-center gap-2">
+          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 text-red-200 rounded-lg flex items-center gap-2 text-sm">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {success && (
-          <div className="mb-4 p-3 bg-green-900/50 border border-green-700 text-green-200 rounded-lg flex items-center gap-2">
+          <div className="mb-4 p-3 bg-green-900/50 border border-green-700 text-green-200 rounded-lg flex items-center gap-2 text-sm">
             <CheckCircle className="w-5 h-5 flex-shrink-0" />
             <span>{success}</span>
           </div>
         )}
 
-        {step === 1 ? (
-          <form onSubmit={handleSendCode} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* STEP 1: Enter Phone Number */}
+        {step === 1 && (
+          <form onSubmit={handleSendCode} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Telefon raqam</label>
-              <input
-                type="text"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                placeholder="+998901234567"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">API ID</label>
-              <input
-                type="number"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                value={apiId}
-                onChange={(e) => setApiId(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">API Hash</label>
-              <input
-                type="text"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                value={apiHash}
-                onChange={(e) => setApiHash(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="md:col-span-3 flex justify-end">
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
-              >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Kodni Yuborish
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Telegram Kod (SMS/App)</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Telegram Telefon Raqamingiz</label>
+              <div className="flex gap-3">
                 <input
                   type="text"
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                  placeholder="12345"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
+                  className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white font-mono text-lg focus:outline-none focus:border-blue-500"
+                  placeholder="+998901234567"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
                   required
                 />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                >
+                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Kodni Yuborish
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">2FA Parol (agar bor bo'lsa)</label>
-                <input
-                  type="password"
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                  placeholder="2FA Parolingiz"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 2: Enter Telegram SMS/App Code */}
+        {step === 2 && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Telegram SMS/App Kod</label>
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-xl tracking-widest text-center focus:outline-none focus:border-green-500"
+                placeholder="12345"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                autoFocus
+              />
             </div>
 
             <div className="flex justify-between items-center pt-2">
@@ -219,15 +192,56 @@ export default function SessionManager() {
                 onClick={() => setStep(1)}
                 className="text-gray-400 hover:text-white text-sm"
               >
+                ← Raqamni o'zgartirish
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-green-600 hover:bg-green-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+              >
+                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                Sessiyani Tasdiqlash
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 3: Enter 2FA Password (Only shown if Telegram asks for 2FA) */}
+        {step === 3 && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="p-3 bg-yellow-900/40 border border-yellow-700/60 rounded-lg text-yellow-200 text-xs flex items-center gap-2">
+              <Lock className="w-4 h-4 text-yellow-400" />
+              <span>Hisobingizda 2-bosqichli xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting.</span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">2FA Parol</label>
+              <input
+                type="password"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500"
+                placeholder="2FA Parolingiz"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-between items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                className="text-gray-400 hover:text-white text-sm"
+              >
                 ← Orqaga
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-green-600 hover:bg-green-500 text-white font-medium px-6 py-2 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
+                className="bg-yellow-600 hover:bg-yellow-500 text-white font-medium px-6 py-2.5 rounded-lg flex items-center gap-2 transition disabled:opacity-50"
               >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
-                Sessiyani Tasdiqlash
+                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                2FA Parol Bilan Kirish
               </button>
             </div>
           </form>

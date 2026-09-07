@@ -228,31 +228,31 @@ async def list_payments(db: Session = Depends(get_db)):
 # --------------------------------------------------------
 # Sessions Management Endpoints
 # --------------------------------------------------------
+from telethon.errors import SessionPasswordNeededError
+
 @app.post("/sessions/send-code")
 @app.post("/api/sessions/send-code")
 async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
     try:
-        code_hash = await telegram_manager.send_code(req.phone, req.api_id, req.api_hash)
+        clean_p = telegram_manager.clean_phone(req.phone)
+        code_hash = await telegram_manager.send_code(clean_p)
 
-        # Update or create DB entry
-        sess = db.query(TGSession).filter(TGSession.phone == req.phone).first()
+        sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if not sess:
             sess = TGSession(
-                phone=req.phone,
-                api_id=req.api_id,
-                api_hash=req.api_hash,
+                phone=clean_p,
+                api_id=req.api_id or 24511179,
+                api_hash=req.api_hash or "ac098d8c9f90857f2c443302d86a7288",
                 status="pending_code",
                 phone_code_hash=code_hash,
             )
             db.add(sess)
         else:
-            sess.api_id = req.api_id
-            sess.api_hash = req.api_hash
             sess.status = "pending_code"
             sess.phone_code_hash = code_hash
 
         db.commit()
-        return {"status": "ok", "message": "SMS code sent to Telegram", "phone_code_hash": code_hash}
+        return {"status": "ok", "message": "Telegram ilovangizga SMS kod yuborildi!", "phone_code_hash": code_hash, "phone": clean_p}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -261,20 +261,23 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
 @app.post("/api/sessions/login")
 async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
     try:
+        clean_p = telegram_manager.clean_phone(req.phone)
         session_str = await telegram_manager.sign_in(
-            phone=req.phone,
+            phone=clean_p,
             code=req.code,
             phone_code_hash=req.phone_code_hash,
             password=req.password,
         )
 
-        sess = db.query(TGSession).filter(TGSession.phone == req.phone).first()
+        sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if sess:
             sess.session_string = session_str
             sess.status = "active"
             db.commit()
 
-        return {"status": "ok", "message": "Telegram session connected successfully"}
+        return {"status": "ok", "message": "Telegram sessiyasi muvaffaqiyatli ulandi!"}
+    except SessionPasswordNeededError:
+        return {"status": "2fa_required", "message": "Hisobingizda 2-bosqichli xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

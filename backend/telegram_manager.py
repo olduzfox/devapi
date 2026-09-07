@@ -8,9 +8,13 @@ import time
 from typing import Dict, Optional
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TGSession, Payment, Card
+
+DEFAULT_API_ID = 24511179
+DEFAULT_API_HASH = "ac098d8c9f90857f2c443302d86a7288"
 
 
 class TelegramManager:
@@ -19,44 +23,67 @@ class TelegramManager:
         self.pending_logins: Dict[str, TelegramClient] = {}
         self.loop = None
 
-    def get_event_loop(self):
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            if self.loop and self.loop.is_running():
-                return self.loop
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            return self.loop
+    def clean_phone(self, phone: str) -> str:
+        cleaned = re.sub(r"[^\d+]", "", phone.strip())
+        if not cleaned.startswith("+"):
+            cleaned = "+" + cleaned
+        return cleaned
 
-    async def send_code(self, phone: str, api_id: int, api_hash: str) -> str:
-        """Sends OTP code to the Telegram phone number."""
-        client = TelegramClient(StringSession(), api_id, api_hash)
+    async def send_code(self, phone: str) -> str:
+        """Sends OTP code to the Telegram phone number using default API credentials."""
+        phone = self.clean_phone(phone)
+
+        # Clean old pending client if exists
+        if phone in self.pending_logins:
+            try:
+                await self.pending_logins[phone].disconnect()
+            except Exception:
+                pass
+            del self.pending_logins[phone]
+
+        client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
         await client.connect()
-        res = await client.send_code_request(phone)
-        self.pending_logins[phone] = client
-        return res.phone_code_hash
+        
+        try:
+            res = await client.send_code_request(phone)
+            self.pending_logins[phone] = client
+            print(f"[TelegramManager] Code requested successfully for {phone}")
+            return res.phone_code_hash
+        except Exception as e:
+            await client.disconnect()
+            raise ValueError(f"Telegram kodini yuborishda xatolik: {str(e)}")
 
     async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None) -> str:
-        """Completes Telegram login and returns exported StringSession string."""
-        if phone not in self.pending_logins:
-            raise ValueError("No pending login session found for this phone number. Please request code first.")
+        """Completes Telegram login and returns StringSession."""
+        phone = self.clean_phone(phone)
 
-        client = self.pending_logins[phone]
+        if phone not in self.pending_logins:
+            # Try to recreate client connection
+            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            self.pending_logins[phone] = client
+        else:
+            client = self.pending_logins[phone]
+
         try:
-            await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+            await client.sign_in(phone=phone, code=code.strip(), phone_code_hash=phone_code_hash.strip())
+        except SessionPasswordNeededError:
+            if not password:
+                raise SessionPasswordNeededError("2FA Parol talab etiladi")
+            await client.sign_in(password=password.strip())
         except Exception as e:
-            if "Two-steps verification" in str(e) or "2FA" in str(e) or "password" in str(e).lower():
+            if "password" in str(e).lower() or "2fa" in str(e).lower() or "two-step" in str(e).lower():
                 if not password:
-                    raise ValueError("2FA Password required for this account.")
-                await client.sign_in(password=password)
+                    raise SessionPasswordNeededError("2FA Parol talab etiladi")
+                await client.sign_in(password=password.strip())
             else:
                 raise e
 
         session_str = client.session.save()
-        del self.pending_logins[phone]
-        
-        # Start monitoring with this client
+        if phone in self.pending_logins:
+            del self.pending_logins[phone]
+
+        # Attach message handler and activate
         await self._attach_handler_and_start(phone, client)
         return session_str
 
@@ -95,10 +122,10 @@ class TelegramManager:
             print(f"[Telegram Message Received]:\n{text.encode('ascii', errors='backslashreplace').decode('ascii')}")
         except Exception:
             pass
+
         if "To'ldirish" not in text:
             return False
 
-        # Extract last 4 digits of card from message (e.g. 💳 *4271)
         detected_card_number = None
         if "💳" in text:
             for line in text.split("\n"):
@@ -112,7 +139,6 @@ class TelegramManager:
             matched = False
 
             for p in pending_payments:
-                # Format amount: e.g. 10000 -> 10.000,00
                 amount_formatted = f"{p.amount:,}".replace(",", ".") + ",00"
 
                 if amount_formatted in text or str(p.amount) in text.replace(".", "").replace(",", ""):
@@ -132,9 +158,13 @@ class TelegramManager:
             db.close()
 
     async def disconnect_session(self, phone: str):
+        phone = self.clean_phone(phone)
         if phone in self.clients:
             client = self.clients[phone]
-            await client.disconnect()
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
             del self.clients[phone]
 
 
