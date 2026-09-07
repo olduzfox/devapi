@@ -51,6 +51,12 @@ export default function SessionManager() {
         }),
       });
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(`Server Xatosi (HTTP ${res.status}): Nginx yoki Backend xabari: ${text.substring(0, 150)}`);
+      }
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Kodni yuborishda xatolik');
 
@@ -81,6 +87,12 @@ export default function SessionManager() {
           password: password.trim() || null,
         }),
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(`Server Xatosi (HTTP ${res.status}): ${text.substring(0, 150)}`);
+      }
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Tasdiqlashda xatolik');
