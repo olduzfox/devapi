@@ -526,7 +526,7 @@ async def qr_start_endpoint():
 @app.post("/api/sessions/qr/check")
 async def qr_check_endpoint(req: QRCheckReq, db: Session = Depends(get_db)):
     try:
-        result = await telegram_manager.check_qr_login(req.token_id, req.password)
+        result = await telegram_manager.check_qr_login(req.token_id, req.password, store_id=req.store_id)
         if result.get("status") == "authorized" and result.get("phone") and req.store_id:
             sess = db.query(TGSession).filter(TGSession.phone == result["phone"]).first()
             if sess:
@@ -576,7 +576,7 @@ async def list_sessions(
     query = db.query(TGSession)
     
     if sid:
-        query = query.filter(TGSession.store_id == sid)
+        query = query.filter((TGSession.store_id == sid) | (TGSession.store_id == None))
     elif user:
         user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
         if user_store_ids:

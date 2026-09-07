@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink, Store } from 'lucide-react';
 
 export default function SessionManager() {
+  const { activeStore } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,7 +35,7 @@ export default function SessionManager() {
 
   useEffect(() => {
     fetchSessions();
-  }, []);
+  }, [activeStore]);
 
   // Poll QR status when QR active
   useEffect(() => {
@@ -48,7 +50,8 @@ export default function SessionManager() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch('/api/sessions');
+      const url = activeStore ? `/api/sessions?store_id=${activeStore.id}` : '/api/sessions';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setSessions(data);
@@ -74,6 +77,7 @@ export default function SessionManager() {
           force_sms: forceSms,
           api_id: useCustomApi ? parseInt(apiId) : 24511179,
           api_hash: useCustomApi ? apiHash.trim() : 'ac098d8c9f90857f2c443302d86a7288',
+          store_id: activeStore ? activeStore.id : null,
         }),
       });
 
@@ -113,6 +117,7 @@ export default function SessionManager() {
           password: password.trim() || null,
           api_id: useCustomApi ? parseInt(apiId) : 24511179,
           api_hash: useCustomApi ? apiHash.trim() : 'ac098d8c9f90857f2c443302d86a7288',
+          store_id: activeStore ? activeStore.id : null,
         }),
       });
 
@@ -177,6 +182,7 @@ export default function SessionManager() {
         body: JSON.stringify({
           token_id: qrTokenId,
           password: pass || (qrPassword ? qrPassword.trim() : null),
+          store_id: activeStore ? activeStore.id : null,
         }),
       });
 
@@ -222,6 +228,7 @@ export default function SessionManager() {
         body: JSON.stringify({
           phone: phone.trim(),
           session_string: sessionStringInput.trim(),
+          store_id: activeStore ? activeStore.id : null,
         }),
       });
 

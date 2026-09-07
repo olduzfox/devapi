@@ -88,7 +88,7 @@ class TelegramManager:
 
         raise ValueError(f"QR Kod yaratishda xatolik: {str(last_error)}")
 
-    async def check_qr_login(self, token_id: str, password: Optional[str] = None) -> dict:
+    async def check_qr_login(self, token_id: str, password: Optional[str] = None, store_id: Optional[int] = None) -> dict:
         """Checks status of QR login session."""
         if token_id not in self.pending_qr_logins:
             return {"status": "expired", "message": "QR kod vaqti tugadi yoki topilmadi."}
@@ -116,6 +116,7 @@ class TelegramManager:
                     sess = db.query(TGSession).filter(TGSession.phone == phone).first()
                     if not sess:
                         sess = TGSession(
+                            store_id=store_id,
                             phone=phone,
                             api_id=api_id,
                             api_hash=api_hash,
@@ -124,6 +125,8 @@ class TelegramManager:
                         )
                         db.add(sess)
                     else:
+                        if store_id:
+                            sess.store_id = store_id
                         sess.session_string = session_str
                         sess.status = "active"
                     db.commit()
@@ -164,6 +167,7 @@ class TelegramManager:
                 sess = db.query(TGSession).filter(TGSession.phone == phone).first()
                 if not sess:
                     sess = TGSession(
+                        store_id=store_id,
                         phone=phone,
                         api_id=api_id,
                         api_hash=api_hash,
@@ -172,6 +176,8 @@ class TelegramManager:
                     )
                     db.add(sess)
                 else:
+                    if store_id:
+                        sess.store_id = store_id
                     sess.session_string = session_str
                     sess.status = "active"
                 db.commit()
