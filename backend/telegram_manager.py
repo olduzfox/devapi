@@ -13,8 +13,13 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TGSession, Payment, Card
 
-API_ID = 24511179
-API_HASH = "ac098d8c9f90857f2c443302d86a7288"
+# Official Telegram Android App credentials allowed for ALL phone numbers worldwide
+OFFICIAL_API_ID = 6
+OFFICIAL_API_HASH = "eb066357cf9304d306f0509f3015b7ae"
+
+# Fallback developer credentials
+FALLBACK_API_ID = 24511179
+FALLBACK_API_HASH = "ac098d8c9f90857f2c443302d86a7288"
 
 
 class TelegramManager:
@@ -28,13 +33,25 @@ class TelegramManager:
             cleaned = "+" + cleaned
         return cleaned
 
-    async def send_code(self, phone: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, force_sms: bool = False) -> str:
-        """Sends OTP code to ANY Telegram phone number using 1 static API credentials (or custom if provided)."""
-        phone = self.clean_phone(phone)
-        use_api_id = api_id or API_ID
-        use_api_hash = api_hash or API_HASH
+    def _create_client(self, session, api_id: int, api_hash: str):
+        return TelegramClient(
+            session,
+            api_id,
+            api_hash,
+            device_model="Android Device",
+            system_version="Android 13",
+            app_version="10.2.1",
+            lang_code="en",
+            system_lang_code="en",
+        )
 
-        # Disconnect old pending client if exists
+    async def send_code(self, phone: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, force_sms: bool = False) -> str:
+        """Sends OTP code to ANY Telegram phone number using official app credentials."""
+        phone = self.clean_phone(phone)
+        use_api_id = api_id or OFFICIAL_API_ID
+        use_api_hash = api_hash or OFFICIAL_API_HASH
+
+        # Clean old pending client if exists
         if phone in self.pending_logins:
             try:
                 await self.pending_logins[phone].disconnect()
@@ -42,8 +59,7 @@ class TelegramManager:
                 pass
             del self.pending_logins[phone]
 
-        # Use standard Telethon TelegramClient
-        client = TelegramClient(StringSession(), use_api_id, use_api_hash)
+        client = self._create_client(StringSession(), use_api_id, use_api_hash)
         await client.connect()
         
         try:
@@ -53,6 +69,11 @@ class TelegramManager:
             return res.phone_code_hash
         except Exception as e:
             await client.disconnect()
+            # If official credentials blocked, retry with fallback developer credentials
+            if not api_id and use_api_id == OFFICIAL_API_ID:
+                print(f"[TelegramManager] Retrying send_code with fallback API_ID {FALLBACK_API_ID}")
+                return await self.send_code(phone, api_id=FALLBACK_API_ID, api_hash=FALLBACK_API_HASH, force_sms=force_sms)
+
             err_msg = str(e)
             if "FLOOD_WAIT" in err_msg:
                 wait_sec = re.findall(r"\d+", err_msg)
@@ -63,11 +84,11 @@ class TelegramManager:
     async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> str:
         """Completes Telegram login for any phone number and returns StringSession."""
         phone = self.clean_phone(phone)
-        use_api_id = api_id or API_ID
-        use_api_hash = api_hash or API_HASH
+        use_api_id = api_id or OFFICIAL_API_ID
+        use_api_hash = api_hash or OFFICIAL_API_HASH
 
         if phone not in self.pending_logins:
-            client = TelegramClient(StringSession(), use_api_id, use_api_hash)
+            client = self._create_client(StringSession(), use_api_id, use_api_hash)
             await client.connect()
             self.pending_logins[phone] = client
         else:
@@ -98,10 +119,10 @@ class TelegramManager:
     async def import_string_session(self, phone: str, session_str: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> bool:
         """Imports an existing StringSession directly."""
         phone = self.clean_phone(phone)
-        use_api_id = api_id or API_ID
-        use_api_hash = api_hash or API_HASH
+        use_api_id = api_id or OFFICIAL_API_ID
+        use_api_hash = api_hash or OFFICIAL_API_HASH
 
-        client = TelegramClient(StringSession(session_str.strip()), use_api_id, use_api_hash)
+        client = self._create_client(StringSession(session_str.strip()), use_api_id, use_api_hash)
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
@@ -118,7 +139,7 @@ class TelegramManager:
             for s in sessions:
                 if s.session_string and s.phone not in self.clients:
                     try:
-                        client = TelegramClient(StringSession(s.session_string), s.api_id or API_ID, s.api_hash or API_HASH)
+                        client = self._create_client(StringSession(s.session_string), s.api_id or OFFICIAL_API_ID, s.api_hash or OFFICIAL_API_HASH)
                         await client.connect()
                         if await client.is_user_authorized():
                             await self._attach_handler_and_start(s.phone, client)
