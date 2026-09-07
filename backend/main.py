@@ -176,6 +176,7 @@ async def create_payment(
         "status": "ok",
         "payment_id": payment_id,
         "amount": amt,
+        "card_number": assigned_card.card_number,
         "card": {
             "name": assigned_card.name,
             "number": assigned_card.card_number,
@@ -214,6 +215,7 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
             "payment_id": payment.payment_id,
             "amount": payment.amount,
             "card_number": payment.card_number,
+            "card_name": payment.card_name,
             "payment_status": payment.status,
         },
     }
@@ -388,8 +390,6 @@ async def list_cards(db: Session = Depends(get_db)):
 @app.post("/api/cards")
 async def add_card(card: CardReq, db: Session = Depends(get_db)):
     clean_num = card.card_number.strip()
-    if len(clean_num) > 4:
-        clean_num = clean_num[-4:]
 
     new_card = Card(name=card.name.strip().upper(), card_number=clean_num)
     db.add(new_card)

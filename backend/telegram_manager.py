@@ -373,7 +373,8 @@ class TelegramManager:
 
                 if amount_formatted in text or str(p.amount) in text.replace(".", "").replace(",", ""):
                     if p.card_number:
-                        if detected_card_number and detected_card_number == p.card_number:
+                        p_card_clean = p.card_number.replace(" ", "")
+                        if detected_card_number and (detected_card_number == p_card_clean or p_card_clean.endswith(detected_card_number)):
                             p.status = "paid"
                             matched = True
                     else:

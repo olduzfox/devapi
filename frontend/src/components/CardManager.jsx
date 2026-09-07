@@ -4,7 +4,7 @@ import { CreditCard, Plus, Trash2, AlertCircle, CheckCircle, RefreshCw } from 'l
 export default function CardManager() {
   const [cards, setCards] = useState([]);
   const [name, setName] = useState('HUMOCARD');
-  const [cardNumber, setCardNumber] = useState('4271');
+  const [cardNumber, setCardNumber] = useState('8600123456789012');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -101,12 +101,12 @@ export default function CardManager() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Karta Raqami (Oxirgi 4 raqam)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Karta Raqami (To'liq raqam yoki 4 raqam)</label>
             <input
               type="text"
               className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500 font-mono"
-              placeholder="4271"
-              maxLength={16}
+              placeholder="8600123456789012"
+              maxLength={25}
               value={cardNumber}
               onChange={(e) => setCardNumber(e.target.value)}
               required
@@ -148,8 +148,8 @@ export default function CardManager() {
               >
                 <div>
                   <div className="text-xs text-gray-400 font-semibold">{c.name}</div>
-                  <div className="text-lg font-mono font-bold text-white tracking-widest mt-1">
-                    •••• *{c.card_number}
+                  <div className="text-sm font-mono font-bold text-white tracking-wider mt-1">
+                    {c.card_number.length > 4 ? c.card_number : `•••• *${c.card_number}`}
                   </div>
                 </div>
 
