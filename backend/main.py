@@ -9,13 +9,14 @@ import string
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
-from fastapi import FastAPI, Form, HTTPException, Depends, Body
+from fastapi import FastAPI, Form, HTTPException, Depends, Body, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import engine, Base, get_db
-from models import TGSession, Card, Payment
+from models import User, Store, TGSession, Card, Payment
+from auth_utils import hash_password, verify_password, create_access_token, decode_access_token, generate_api_key
 from telegram_manager import telegram_manager
 
 # Create database tables
@@ -35,7 +36,7 @@ async def lifespan(app: FastAPI):
     print("[Server Shutdown]")
 
 
-app = FastAPI(title="Telegram Provider Payment API", lifespan=lifespan)
+app = FastAPI(title="Telegram Provider Payment API & SaaS Platform", lifespan=lifespan)
 
 # Allow CORS for ReactJS frontend
 app.add_middleware(
@@ -48,13 +49,66 @@ app.add_middleware(
 
 
 # --------------------------------------------------------
+# Auth & Store Dependencies
+# --------------------------------------------------------
+def get_current_user(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db)
+) -> User:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Avtorizatsiya talab etiladi (Token mavjud emas)")
+    
+    token = authorization.replace("Bearer ", "").strip()
+    payload = decode_access_token(token)
+    if not payload or "user_id" not in payload:
+        raise HTTPException(status_code=401, detail="Token yaroqsiz yoki muddati o'tgan")
+    
+    user = db.query(User).filter(User.id == payload["user_id"]).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Foydalanuvchi topilmadi")
+    return user
+
+
+def get_optional_current_user(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    if not authorization:
+        return None
+    try:
+        token = authorization.replace("Bearer ", "").strip()
+        payload = decode_access_token(token)
+        if payload and "user_id" in payload:
+            return db.query(User).filter(User.id == payload["user_id"]).first()
+    except Exception:
+        pass
+    return None
+
+
+# --------------------------------------------------------
 # Pydantic Schemas
 # --------------------------------------------------------
+class RegisterReq(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = ""
+
+
+class AuthLoginReq(BaseModel):
+    email: str
+    password: str
+
+
+class CreateStoreReq(BaseModel):
+    name: str
+
+
 class SendCodeReq(BaseModel):
     phone: str
     force_sms: Optional[bool] = False
     api_id: Optional[int] = 24511179
     api_hash: Optional[str] = "ac098d8c9f90857f2c443302d86a7288"
+    store_id: Optional[int] = None
 
 
 class LoginReq(BaseModel):
@@ -62,25 +116,149 @@ class LoginReq(BaseModel):
     code: str
     phone_code_hash: str
     password: Optional[str] = None
+    store_id: Optional[int] = None
 
 
 class ImportSessionReq(BaseModel):
     phone: str
     session_string: str
+    store_id: Optional[int] = None
 
 
 class QRCheckReq(BaseModel):
     token_id: str
     password: Optional[str] = None
+    store_id: Optional[int] = None
 
 
 class CardReq(BaseModel):
     name: str
     card_number: str
+    store_id: Optional[int] = None
 
 
 class SimulateMsgReq(BaseModel):
     text: str
+
+
+# --------------------------------------------------------
+# Auth Endpoints
+# --------------------------------------------------------
+@app.post("/api/auth/register")
+async def register(req: RegisterReq, db: Session = Depends(get_db)):
+    email_clean = req.email.strip().lower()
+    if not email_clean or "@" not in email_clean:
+        raise HTTPException(status_code=400, detail="To'g'ri email manzilini kiriting")
+    
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="Parol kamida 4 ta belgidan iborat bo'lishi kerak")
+
+    existing = db.query(User).filter(User.email == email_clean).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Ushbu email bilan foydalanuvchi allaqachon ro'yxatdan o'tgan")
+
+    user = User(
+        email=email_clean,
+        password_hash=hash_password(req.password),
+        full_name=req.full_name.strip() if req.full_name else email_clean.split("@")[0].capitalize()
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # Avtomatik ravishda birinchi do'kon yaratamiz
+    default_store = Store(
+        user_id=user.id,
+        name="Asosiy Do'kon",
+        api_key=generate_api_key(),
+        is_active=True
+    )
+    db.add(default_store)
+    db.commit()
+    db.refresh(default_store)
+
+    token = create_access_token({"user_id": user.id, "email": user.email})
+    return {
+        "status": "ok",
+        "token": token,
+        "user": {"id": user.id, "email": user.email, "full_name": user.full_name},
+        "stores": [{"id": default_store.id, "name": default_store.name, "api_key": default_store.api_key}]
+    }
+
+
+@app.post("/api/auth/login")
+async def login_user(req: AuthLoginReq, db: Session = Depends(get_db)):
+    email_clean = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user or not verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Email yoki parol noto'g'ri")
+
+    stores = db.query(Store).filter(Store.user_id == user.id, Store.is_active == True).all()
+    token = create_access_token({"user_id": user.id, "email": user.email})
+    return {
+        "status": "ok",
+        "token": token,
+        "user": {"id": user.id, "email": user.email, "full_name": user.full_name},
+        "stores": [{"id": s.id, "name": s.name, "api_key": s.api_key} for s in stores]
+    }
+
+
+@app.get("/api/auth/me")
+async def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stores = db.query(Store).filter(Store.user_id == user.id, Store.is_active == True).all()
+    return {
+        "user": {"id": user.id, "email": user.email, "full_name": user.full_name},
+        "stores": [{"id": s.id, "name": s.name, "api_key": s.api_key} for s in stores]
+    }
+
+
+# --------------------------------------------------------
+# Stores Management Endpoints
+# --------------------------------------------------------
+@app.get("/api/stores")
+async def list_stores(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stores = db.query(Store).filter(Store.user_id == user.id, Store.is_active == True).all()
+    return [{"id": s.id, "name": s.name, "api_key": s.api_key, "created_at": s.created_at.isoformat()} for s in stores]
+
+
+@app.post("/api/stores")
+async def create_store(req: CreateStoreReq, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    name_clean = req.name.strip()
+    if not name_clean:
+        raise HTTPException(status_code=400, detail="Do'kon nomi kiritilishi kerak")
+
+    new_store = Store(
+        user_id=user.id,
+        name=name_clean,
+        api_key=generate_api_key(),
+        is_active=True
+    )
+    db.add(new_store)
+    db.commit()
+    db.refresh(new_store)
+    return {"status": "ok", "store": {"id": new_store.id, "name": new_store.name, "api_key": new_store.api_key}}
+
+
+@app.post("/api/stores/{store_id}/regenerate-key")
+async def regenerate_api_key(store_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    store = db.query(Store).filter(Store.id == store_id, Store.user_id == user.id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
+
+    store.api_key = generate_api_key()
+    db.commit()
+    return {"status": "ok", "api_key": store.api_key}
+
+
+@app.delete("/api/stores/{store_id}")
+async def delete_store(store_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    store = db.query(Store).filter(Store.id == store_id, Store.user_id == user.id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
+
+    db.delete(store)
+    db.commit()
+    return {"status": "ok", "message": "Do'kon muvaffaqiyatli o'chirildi"}
 
 
 # --------------------------------------------------------
@@ -92,11 +270,20 @@ class SimulateMsgReq(BaseModel):
 async def create_payment(
     amount: Optional[int] = Form(None),
     body_amount: Optional[int] = Body(None, embed=True),
+    api_key_form: Optional[str] = Form(None, alias="api_key"),
+    api_key_body: Optional[str] = Body(None, embed=True, alias="api_key"),
+    x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
     db: Session = Depends(get_db),
 ):
     amt = amount or body_amount
     if not amt or amt <= 0:
         raise HTTPException(status_code=400, detail="Miqdor (amount) to'g'ri kiritilishi kerak")
+
+    # API key orqali Do'konni aniqlaymiz
+    key = x_api_key or api_key_form or api_key_body
+    store = None
+    if key:
+        store = db.query(Store).filter(Store.api_key == key.strip(), Store.is_active == True).first()
 
     current_time = time.time()
 
@@ -111,16 +298,20 @@ async def create_payment(
     alphabet = string.ascii_letters + string.digits
     payment_id = "".join(secrets.choice(alphabet) for _ in range(15))
 
-    # Active kartalarni bazadan olamiz
-    active_cards = db.query(Card).filter(Card.is_active == True).all()
+    # Active kartalarni bazadan olamiz (agar store biriktirilgan bo'lsa, store kartalari, aks holda barcha kartalar)
+    card_query = db.query(Card).filter(Card.is_active == True)
+    if store:
+        store_cards = card_query.filter(Card.store_id == store.id).all()
+        active_cards = store_cards if store_cards else card_query.all()
+    else:
+        active_cards = card_query.all()
 
-    # Agar kartalar ro'yxati bo'sh bo'lsa, default rejimda ishlaydi
     if not active_cards:
-        # 🔥 MUHIM LOGIKA: Agar ayni shu summa "pending" bo'lsa, +100 so'm qo'shamiz!
         while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
             amt += 100
 
         new_payment = Payment(
+            store_id=store.id if store else None,
             payment_id=payment_id,
             amount=amt,
             card_number=None,
@@ -136,10 +327,11 @@ async def create_payment(
             "payment_id": payment_id,
             "amount": amt,
             "card": None,
+            "card_number": None,
+            "store": store.name if store else None,
             "message": "Payment created",
         }
 
-    # Kartalar mavjud bo'lsa, bir xil miqdordagi kutilayotgan to'lovlarni tekshiramiz
     assigned_card = None
     for card in active_cards:
         card_num = card.card_number
@@ -154,13 +346,13 @@ async def create_payment(
             assigned_card = card
             break
 
-    # Agar barcha kartalarda ham bor bo'lsa, miqdorga +100 so'm qo'shib karta biriktiramiz
     if not assigned_card:
         while db.query(Payment).filter(Payment.amount == amt, Payment.status == "pending").first():
             amt += 100
         assigned_card = active_cards[0]
 
     new_payment = Payment(
+        store_id=store.id if store else (assigned_card.store_id if assigned_card else None),
         payment_id=payment_id,
         amount=amt,
         card_number=assigned_card.card_number,
@@ -181,6 +373,7 @@ async def create_payment(
             "name": assigned_card.name,
             "number": assigned_card.card_number,
         },
+        "store": store.name if store else None,
         "message": "Payment created",
     }
 
@@ -204,7 +397,6 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
         }
 
     current_time = time.time()
-    # 20 daqiqa limit (1200 soniya)
     if current_time - payment.created_at > 1200 and payment.status == "pending":
         payment.status = "cancel"
         db.commit()
@@ -217,10 +409,10 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
             "card_number": payment.card_number,
             "card_name": payment.card_name,
             "payment_status": payment.status,
+            "store_id": payment.store_id,
         },
     }
 
-    # Bazada barcha to'lovlar va ularning tarixi doimiy saqlanadi (o'chirilmaydi)
     if payment.status in ["paid", "cancel"] and not payment.served:
         payment.served = True
         db.commit()
@@ -232,8 +424,23 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
 # Payments list for Dashboard
 # --------------------------------------------------------
 @app.get("/api/payments")
-async def list_payments(db: Session = Depends(get_db)):
-    payments = db.query(Payment).order_by(Payment.id.desc()).all()
+async def list_payments(
+    store_id: Optional[int] = Query(None),
+    x_store_id: Optional[int] = Header(None, alias="X-Store-Id"),
+    user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db)
+):
+    sid = store_id or x_store_id
+    query = db.query(Payment)
+    
+    if sid:
+        query = query.filter(Payment.store_id == sid)
+    elif user:
+        user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
+        if user_store_ids:
+            query = query.filter(Payment.store_id.in_(user_store_ids))
+
+    payments = query.order_by(Payment.id.desc()).all()
     return payments
 
 
@@ -252,6 +459,7 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
         sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if not sess:
             sess = TGSession(
+                store_id=req.store_id,
                 phone=clean_p,
                 api_id=req.api_id or 24511179,
                 api_hash=req.api_hash or "ac098d8c9f90857f2c443302d86a7288",
@@ -260,6 +468,8 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
             )
             db.add(sess)
         else:
+            if req.store_id:
+                sess.store_id = req.store_id
             sess.api_id = req.api_id or sess.api_id or 24511179
             sess.api_hash = req.api_hash or sess.api_hash or "ac098d8c9f90857f2c443302d86a7288"
             sess.status = "pending_code"
@@ -282,6 +492,7 @@ async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(g
         sess = db.query(TGSession).filter(TGSession.phone == clean_p).first()
         if not sess:
             sess = TGSession(
+                store_id=req.store_id,
                 phone=clean_p,
                 api_id=24511179,
                 api_hash="ac098d8c9f90857f2c443302d86a7288",
@@ -290,6 +501,8 @@ async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(g
             )
             db.add(sess)
         else:
+            if req.store_id:
+                sess.store_id = req.store_id
             sess.session_string = req.session_string.strip()
             sess.status = "active"
 
@@ -299,9 +512,6 @@ async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(g
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# --------------------------------------------------------
-# QR Code Login Endpoints
-# --------------------------------------------------------
 @app.post("/sessions/qr/start")
 @app.post("/api/sessions/qr/start")
 async def qr_start_endpoint():
@@ -314,9 +524,14 @@ async def qr_start_endpoint():
 
 @app.post("/sessions/qr/check")
 @app.post("/api/sessions/qr/check")
-async def qr_check_endpoint(req: QRCheckReq):
+async def qr_check_endpoint(req: QRCheckReq, db: Session = Depends(get_db)):
     try:
         result = await telegram_manager.check_qr_login(req.token_id, req.password)
+        if result.get("status") == "authorized" and result.get("phone") and req.store_id:
+            sess = db.query(TGSession).filter(TGSession.phone == result["phone"]).first()
+            if sess:
+                sess.store_id = req.store_id
+                db.commit()
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -338,6 +553,8 @@ async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
         if sess:
             sess.session_string = session_str
             sess.status = "active"
+            if req.store_id:
+                sess.store_id = req.store_id
             db.commit()
 
         return {"status": "ok", "message": "Telegram sessiyasi muvaffaqiyatli ulandi!"}
@@ -349,11 +566,27 @@ async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
 
 @app.get("/sessions")
 @app.get("/api/sessions")
-async def list_sessions(db: Session = Depends(get_db)):
-    sessions = db.query(TGSession).all()
+async def list_sessions(
+    store_id: Optional[int] = Query(None),
+    x_store_id: Optional[int] = Header(None, alias="X-Store-Id"),
+    user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db)
+):
+    sid = store_id or x_store_id
+    query = db.query(TGSession)
+    
+    if sid:
+        query = query.filter(TGSession.store_id == sid)
+    elif user:
+        user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
+        if user_store_ids:
+            query = query.filter((TGSession.store_id.in_(user_store_ids)) | (TGSession.store_id == None))
+
+    sessions = query.all()
     return [
         {
             "id": s.id,
+            "store_id": s.store_id,
             "phone": s.phone,
             "api_id": s.api_id,
             "status": s.status,
@@ -381,8 +614,23 @@ async def delete_session(session_id: int, db: Session = Depends(get_db)):
 # --------------------------------------------------------
 @app.get("/cards")
 @app.get("/api/cards")
-async def list_cards(db: Session = Depends(get_db)):
-    cards = db.query(Card).filter(Card.is_active == True).all()
+async def list_cards(
+    store_id: Optional[int] = Query(None),
+    x_store_id: Optional[int] = Header(None, alias="X-Store-Id"),
+    user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db)
+):
+    sid = store_id or x_store_id
+    query = db.query(Card).filter(Card.is_active == True)
+    
+    if sid:
+        query = query.filter(Card.store_id == sid)
+    elif user:
+        user_store_ids = [s.id for s in db.query(Store).filter(Store.user_id == user.id).all()]
+        if user_store_ids:
+            query = query.filter((Card.store_id.in_(user_store_ids)) | (Card.store_id == None))
+
+    cards = query.all()
     return cards
 
 
@@ -391,7 +639,11 @@ async def list_cards(db: Session = Depends(get_db)):
 async def add_card(card: CardReq, db: Session = Depends(get_db)):
     clean_num = card.card_number.strip()
 
-    new_card = Card(name=card.name.strip().upper(), card_number=clean_num)
+    new_card = Card(
+        store_id=card.store_id,
+        name=card.name.strip().upper(),
+        card_number=clean_num
+    )
     db.add(new_card)
     db.commit()
     db.refresh(new_card)

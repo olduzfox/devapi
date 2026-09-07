@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, Plus, Trash2, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { CreditCard, Plus, Trash2, AlertCircle, CheckCircle, RefreshCw, Store } from 'lucide-react';
 
 export default function CardManager() {
+  const { activeStore } = useAuth();
   const [cards, setCards] = useState([]);
   const [name, setName] = useState('HUMOCARD');
   const [cardNumber, setCardNumber] = useState('8600123456789012');
@@ -11,11 +13,12 @@ export default function CardManager() {
 
   useEffect(() => {
     fetchCards();
-  }, []);
+  }, [activeStore]);
 
   const fetchCards = async () => {
     try {
-      const res = await fetch('/api/cards');
+      const url = activeStore ? `/api/cards?store_id=${activeStore.id}` : '/api/cards';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setCards(data);
@@ -38,6 +41,7 @@ export default function CardManager() {
         body: JSON.stringify({
           name: name.trim(),
           card_number: cardNumber.trim(),
+          store_id: activeStore ? activeStore.id : null,
         }),
       });
 
@@ -67,6 +71,14 @@ export default function CardManager() {
 
   return (
     <div className="space-y-6">
+      {/* Active Store Banner */}
+      {activeStore && (
+        <div className="bg-blue-950/40 border border-blue-800/60 rounded-xl p-3 flex items-center gap-2 text-xs text-blue-200">
+          <Store className="w-4 h-4 text-blue-400 flex-shrink-0" />
+          <span>Hozirda <b>"{activeStore.name}"</b> do'koni uchun kartalarni boshqarayapsiz</span>
+        </div>
+      )}
+
       {/* Add Card Form */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
         <h2 className="text-xl font-bold text-green-400 flex items-center gap-2 mb-4">

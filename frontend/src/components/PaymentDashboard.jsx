@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Clock, CheckCircle2, XCircle, RefreshCw, Copy, Check } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Activity, Clock, CheckCircle2, XCircle, RefreshCw, Copy, Check, Store } from 'lucide-react';
 
 export default function PaymentDashboard() {
+  const { activeStore } = useAuth();
   const [payments, setPayments] = useState([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [copiedId, setCopiedId] = useState('');
@@ -14,11 +16,12 @@ export default function PaymentDashboard() {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, activeStore]);
 
   const fetchPayments = async () => {
     try {
-      const res = await fetch('/api/payments');
+      const url = activeStore ? `/api/payments?store_id=${activeStore.id}` : '/api/payments';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setPayments(data);
@@ -39,13 +42,27 @@ export default function PaymentDashboard() {
     pending: payments.filter((p) => p.status === 'pending').length,
     paid: payments.filter((p) => p.status === 'paid').length,
     cancel: payments.filter((p) => p.status === 'cancel').length,
+    totalPaidSum: payments.filter((p) => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)
   };
 
   return (
     <div className="space-y-6">
+      {/* Active Store Banner */}
+      {activeStore && (
+        <div className="bg-blue-950/40 border border-blue-800/60 rounded-xl p-3 flex items-center justify-between text-xs text-blue-200">
+          <div className="flex items-center gap-2">
+            <Store className="w-4 h-4 text-blue-400 flex-shrink-0" />
+            <span>Hozirda <b>"{activeStore.name}"</b> do'koni to'lovlar monitoringidasiz</span>
+          </div>
+          <div className="font-mono text-xs text-green-400 font-bold">
+            Tushum: {stats.totalPaidSum.toLocaleString()} UZS
+          </div>
+        </div>
+      )}
+
       {/* Stats Header */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between shadow">
           <div>
             <p className="text-sm font-medium text-gray-400">Jami To'lovlar</p>
             <p className="text-2xl font-bold text-white mt-1">{stats.total}</p>
@@ -53,7 +70,7 @@ export default function PaymentDashboard() {
           <Activity className="w-8 h-8 text-blue-400" />
         </div>
 
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between shadow">
           <div>
             <p className="text-sm font-medium text-gray-400">Kutilayotgan (Pending)</p>
             <p className="text-2xl font-bold text-yellow-400 mt-1">{stats.pending}</p>
@@ -61,7 +78,7 @@ export default function PaymentDashboard() {
           <Clock className="w-8 h-8 text-yellow-400" />
         </div>
 
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between shadow">
           <div>
             <p className="text-sm font-medium text-gray-400">To'langan (Paid)</p>
             <p className="text-2xl font-bold text-green-400 mt-1">{stats.paid}</p>
@@ -69,7 +86,7 @@ export default function PaymentDashboard() {
           <CheckCircle2 className="w-8 h-8 text-green-400" />
         </div>
 
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex items-center justify-between shadow">
           <div>
             <p className="text-sm font-medium text-gray-400">Bekor bo'lgan (Cancel)</p>
             <p className="text-2xl font-bold text-red-400 mt-1">{stats.cancel}</p>
@@ -139,7 +156,7 @@ export default function PaymentDashboard() {
                       <td className="px-4 py-3 font-mono text-gray-300">
                         {p.card_number ? (
                           <span>
-                            {p.card_name || 'KARTA'} (*{p.card_number})
+                            {p.card_name || 'KARTA'} ({p.card_number})
                           </span>
                         ) : (
                           <span className="text-gray-500 italic">Har qanday karta</span>
@@ -167,7 +184,7 @@ export default function PaymentDashboard() {
                         <button
                           onClick={() => copyToClipboard(p.payment_id)}
                           className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition inline-flex items-center gap-1 text-xs"
-                          title="ID nushasini olish"
+                          title="ID nusxasini olish"
                         >
                           {copiedId === p.payment_id ? (
                             <Check className="w-3.5 h-3.5 text-green-400" />
