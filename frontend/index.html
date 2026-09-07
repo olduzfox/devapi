@@ -1,22 +1,50 @@
 <!DOCTYPE html>
-<html lang="uz">
+<html lang="uz" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PayProvider - Telegram Payment Monitoring API & Dashboard</title>
-    <!-- Tailwind CSS CDN for guaranteed instant styling -->
+    <title>PayProvider - Premium Telegram Payment Monitoring SaaS</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN Config -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+              display: ['"Outfit"', 'sans-serif'],
+              serif: ['"Playfair Display"', 'serif'],
+            },
             colors: {
-              gray: {
-                750: '#1f293d',
-                850: '#131c2e',
-                950: '#0b0f19',
+              creole: {
+                DEFAULT: '#1F0E06',
+                light: '#2E150B',
+              },
+              limeshade: {
+                DEFAULT: '#C6E385',
+                hover: '#B5D86F',
+              },
+              champion: {
+                DEFAULT: '#151130',
+                card: '#1D183F',
+              },
+              lavender: {
+                DEFAULT: '#C8BEFA',
+                subtle: '#E2DCFC',
+              },
+              masterpiece: {
+                DEFAULT: '#5A2132',
+                card: '#6E2A3F',
+              },
+              dirtywhite: {
+                DEFAULT: '#EFE9E9',
+                card: '#F6F2F2',
               }
             }
           }
@@ -24,7 +52,7 @@
       }
     </script>
   </head>
-  <body class="bg-gray-900 text-gray-100 antialiased selection:bg-blue-500 selection:text-white min-h-screen">
+  <body class="bg-gray-950 text-gray-100 antialiased selection:bg-limeshade selection:text-creole min-h-screen transition-colors duration-300 font-sans">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

@@ -710,6 +710,28 @@ async def simulate_message(req: SimulateMsgReq):
     return {"status": "ok", "matched": matched}
 
 
+# --------------------------------------------------------
+# SPA Catch-All Route & Static Files (React Router Support)
+# --------------------------------------------------------
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+static_dist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+
+if os.path.exists(os.path.join(static_dist_path, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dist_path, "assets")), name="assets")
+
+@app.get("/{full_path:path}")
+async def catch_all_spa(full_path: str):
+    if full_path.startswith("api/") or full_path.startswith("create") or full_path.startswith("status/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+    index_file = os.path.join(static_dist_path, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"message": "PayProvider SaaS Platform Backend is active."}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
