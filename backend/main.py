@@ -218,14 +218,10 @@ async def get_payment_status(payment_id: str, db: Session = Depends(get_db)):
         },
     }
 
-    # 🔥 Ikkinchi marta so'ralganda xotiradan/bazadan o'chirish
-    if payment.status in ["paid", "cancel"]:
-        if not payment.served:
-            payment.served = True
-            db.commit()
-        else:
-            db.delete(payment)
-            db.commit()
+    # Bazada barcha to'lovlar va ularning tarixi doimiy saqlanadi (o'chirilmaydi)
+    if payment.status in ["paid", "cancel"] and not payment.served:
+        payment.served = True
+        db.commit()
 
     return response
 

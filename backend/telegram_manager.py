@@ -10,16 +10,14 @@ import string
 from typing import Dict, Optional
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError, ApiIdInvalidError
+from telethon.errors import SessionPasswordNeededError
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TGSession, Payment, Card
 
-# Developer Credentials for QR Login & API
 DEV_API_ID = 24511179
 DEV_API_HASH = "ac098d8c9f90857f2c443302d86a7288"
 
-# Telegram Web App Credentials
 WEB_API_ID = 2040
 WEB_API_HASH = "b18441a1ed609e10d6d11993446c022c"
 
@@ -59,7 +57,6 @@ class TelegramManager:
         alphabet = string.ascii_letters + string.digits
         token_id = "".join(secrets.choice(alphabet) for _ in range(12))
 
-        # Try developer API credentials first for ExportLoginTokenRequest
         try_credentials = [
             (DEV_API_ID, DEV_API_HASH),
             (WEB_API_ID, WEB_API_HASH),
@@ -102,25 +99,66 @@ class TelegramManager:
         api_id = qr_data.get("api_id", DEV_API_ID)
         api_hash = qr_data.get("api_hash", DEV_API_HASH)
 
+        # 1. First check if client is already authorized
+        try:
+            if await client.is_user_authorized():
+                me = await client.get_me()
+                phone = self.clean_phone(me.phone) if me and me.phone else f"+User_{me.id if me else 'Active'}"
+                session_str = client.session.save()
+
+                if token_id in self.pending_qr_logins:
+                    del self.pending_qr_logins[token_id]
+
+                await self._attach_handler_and_start(phone, client)
+
+                db: Session = SessionLocal()
+                try:
+                    sess = db.query(TGSession).filter(TGSession.phone == phone).first()
+                    if not sess:
+                        sess = TGSession(
+                            phone=phone,
+                            api_id=api_id,
+                            api_hash=api_hash,
+                            session_string=session_str,
+                            status="active",
+                        )
+                        db.add(sess)
+                    else:
+                        sess.session_string = session_str
+                        sess.status = "active"
+                    db.commit()
+                finally:
+                    db.close()
+
+                return {
+                    "status": "authorized",
+                    "phone": phone,
+                    "message": f"Telegram sessiyasi ({phone}) QR kod orqali muvaffaqiyatli ulandi!",
+                }
+        except Exception:
+            pass
+
         # 60 sec timeout check
-        if time.time() - qr_data["created_at"] > 60:
+        if time.time() - qr_data["created_at"] > 90:
             try:
                 await client.disconnect()
             except Exception:
                 pass
-            del self.pending_qr_logins[token_id]
+            if token_id in self.pending_qr_logins:
+                del self.pending_qr_logins[token_id]
             return {"status": "expired", "message": "QR kod vaqti tugadi. Iltimos qayta yangilang."}
 
         try:
-            user = await asyncio.wait_for(qr_login.wait(), timeout=1.5)
+            user = await asyncio.wait_for(qr_login.wait(), timeout=1.0)
             session_str = client.session.save()
             me = await client.get_me()
             phone = self.clean_phone(me.phone) if me and me.phone else f"+{user.id}"
 
-            del self.pending_qr_logins[token_id]
+            if token_id in self.pending_qr_logins:
+                del self.pending_qr_logins[token_id]
+
             await self._attach_handler_and_start(phone, client)
 
-            # Save to DB
             db: Session = SessionLocal()
             try:
                 sess = db.query(TGSession).filter(TGSession.phone == phone).first()
@@ -155,7 +193,9 @@ class TelegramManager:
                     me = await client.get_me()
                     phone = self.clean_phone(me.phone) if me and me.phone else "+2FAUser"
 
-                    del self.pending_qr_logins[token_id]
+                    if token_id in self.pending_qr_logins:
+                        del self.pending_qr_logins[token_id]
+
                     await self._attach_handler_and_start(phone, client)
 
                     db: Session = SessionLocal()
