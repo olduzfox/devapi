@@ -457,10 +457,26 @@ async def list_payments(
 # --------------------------------------------------------
 from telethon.errors import SessionPasswordNeededError
 
+def check_store_session_limit(store_id: Optional[int], current_session_id: Optional[int] = None, db: Session = None):
+    if not store_id or not db:
+        return
+    query = db.query(TGSession).filter(
+        TGSession.store_id == store_id,
+        TGSession.status == "active"
+    )
+    if current_session_id:
+        query = query.filter(TGSession.id != current_session_id)
+    if query.first():
+        raise HTTPException(
+            status_code=400,
+            detail="Ushbu do'konga allaqachon faol Telegram sessiyasi biriktirilgan. Har bir do'konga faqat 1 ta faol sessiya ulanishi mumkin."
+        )
+
 @app.post("/sessions/send-code")
 @app.post("/api/sessions/send-code")
 async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
     try:
+        check_store_session_limit(req.store_id, db=db)
         clean_p = telegram_manager.clean_phone(req.phone)
         code_hash = await telegram_manager.send_code(clean_p, api_id=req.api_id, api_hash=req.api_hash, force_sms=bool(req.force_sms))
 
@@ -494,6 +510,7 @@ async def send_code_endpoint(req: SendCodeReq, db: Session = Depends(get_db)):
 @app.post("/api/sessions/import-string")
 async def import_session_endpoint(req: ImportSessionReq, db: Session = Depends(get_db)):
     try:
+        check_store_session_limit(req.store_id, db=db)
         clean_p = telegram_manager.clean_phone(req.phone)
         await telegram_manager.import_string_session(clean_p, req.session_string)
 
@@ -534,6 +551,8 @@ async def qr_start_endpoint():
 @app.post("/api/sessions/qr/check")
 async def qr_check_endpoint(req: QRCheckReq, db: Session = Depends(get_db)):
     try:
+        if req.store_id:
+            check_store_session_limit(req.store_id, db=db)
         result = await telegram_manager.check_qr_login(req.token_id, req.password, store_id=req.store_id)
         if result.get("status") == "authorized" and result.get("phone") and req.store_id:
             sess = db.query(TGSession).filter(TGSession.phone == result["phone"]).first()
@@ -549,6 +568,8 @@ async def qr_check_endpoint(req: QRCheckReq, db: Session = Depends(get_db)):
 @app.post("/api/sessions/login")
 async def login_endpoint(req: LoginReq, db: Session = Depends(get_db)):
     try:
+        if req.store_id:
+            check_store_session_limit(req.store_id, db=db)
         clean_p = telegram_manager.clean_phone(req.phone)
         session_str = await telegram_manager.sign_in(
             phone=clean_p,
@@ -630,9 +651,12 @@ async def bind_session(session_id: int, store_id: int = Body(..., embed=True), d
     sess = db.query(TGSession).filter(TGSession.id == session_id).first()
     if not sess:
         raise HTTPException(status_code=404, detail="Sessiya topilmadi")
+    
+    check_store_session_limit(store_id, current_session_id=session_id, db=db)
     sess.store_id = store_id
     db.commit()
     return {"status": "ok", "message": "Sessiya do'konga muvaffaqiyatli biriktirildi"}
+
 
 
 @app.delete("/sessions/{session_id}")

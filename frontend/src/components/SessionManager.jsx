@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink, Store, Link2, Sparkles } from 'lucide-react';
+import { Send, Key, Smartphone, CheckCircle, Trash2, AlertCircle, RefreshCw, Lock, FileCode, QrCode, ExternalLink, Store, Link2, Sparkles, ShieldAlert, Check } from 'lucide-react';
 import Pagination from './Pagination';
 
 export default function SessionManager() {
@@ -42,23 +42,29 @@ export default function SessionManager() {
     fetchSessions();
   }, [activeStore]);
 
+  // Find if active store ALREADY has an active session
+  const activeStoreSession = useMemo(() => {
+    if (!activeStore) return null;
+    return sessions.find(s => s.store_id === activeStore.id && s.status === 'active');
+  }, [sessions, activeStore]);
+
   // Auto-start QR login when mode switches to 'qr'
   useEffect(() => {
-    if (mode === 'qr' && !qrTokenId && !qrLoading) {
+    if (mode === 'qr' && !qrTokenId && !qrLoading && !activeStoreSession) {
       handleStartQr();
     }
-  }, [mode]);
+  }, [mode, activeStoreSession]);
 
   // Poll QR status when QR active
   useEffect(() => {
     let interval = null;
-    if (mode === 'qr' && qrTokenId && !qr2faRequired) {
+    if (mode === 'qr' && qrTokenId && !qr2faRequired && !activeStoreSession) {
       interval = setInterval(() => {
         checkQrStatus();
       }, 1500);
     }
     return () => clearInterval(interval);
-  }, [mode, qrTokenId, qr2faRequired]);
+  }, [mode, qrTokenId, qr2faRequired, activeStoreSession]);
 
   const fetchSessions = async () => {
     try {
@@ -78,6 +84,12 @@ export default function SessionManager() {
     if (e) e.preventDefault();
     setError('');
     setSuccess('');
+
+    if (activeStoreSession) {
+      setError("Ushbu do'konga allaqachon faol Telegram sessiyasi ulab bo'lingan. Yangi sessiya ulash uchun avvalgisini o'chiring.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -162,6 +174,7 @@ export default function SessionManager() {
 
   // QR Code Handlers
   const handleStartQr = async () => {
+    if (activeStoreSession) return;
     setError('');
     setSuccess('');
     setQrLoading(true);
@@ -231,6 +244,10 @@ export default function SessionManager() {
   // StringSession Handler
   const handleImportStringSession = async (e) => {
     e.preventDefault();
+    if (activeStoreSession) {
+      setError("Ushbu do'konga allaqachon faol Telegram sessiyasi ulab bo'lingan. Yangi sessiya ulash uchun avvalgisini o'chiring.");
+      return;
+    }
     setError('');
     setSuccess('');
     setLoading(true);
@@ -279,17 +296,21 @@ export default function SessionManager() {
 
   const handleBindSession = async (sessionId) => {
     if (!activeStore) return;
+    if (activeStoreSession) {
+      alert("Ushbu do'konga allaqachon faol sessiya biriktirilgan! Avval eskisini o'chiring.");
+      return;
+    }
     try {
       const res = await fetch(`/api/sessions/${sessionId}/bind`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ store_id: activeStore.id })
       });
-      if (res.ok) {
-        fetchSessions();
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Biriktirishda xatolik");
+      fetchSessions();
     } catch (err) {
-      console.error(err);
+      alert(err.message);
     }
   };
 
@@ -299,12 +320,12 @@ export default function SessionManager() {
   }, [sessions, currentPage, pageSize]);
 
   return (
-    <div className="space-y-8 animate-fadeIn">
+    <div className="space-y-6 sm:space-y-8 animate-fadeIn">
       {/* Active Store Indicator Header Banner */}
       {activeStore ? (
-        <div className="bg-gradient-to-r from-champion to-creole text-white rounded-2xl p-4 sm:p-5 shadow-xl border border-limeshade/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-gradient-to-r from-champion via-champion-card to-creole text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl border border-limeshade/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-limeshade/20 rounded-xl text-limeshade">
+            <div className="p-3 bg-limeshade/20 rounded-2xl text-limeshade">
               <Store className="w-6 h-6" />
             </div>
             <div>
@@ -312,9 +333,16 @@ export default function SessionManager() {
               <h2 className="text-lg sm:text-xl font-bold font-display text-white">{activeStore.name}</h2>
             </div>
           </div>
-          <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/15 text-xs text-limeshade font-mono font-bold">
-            Sessiya ushbu do'konga biriktiriladi
-          </div>
+          {activeStoreSession ? (
+            <div className="bg-emerald-500/20 backdrop-blur-md px-4 py-2 rounded-2xl border border-emerald-500/40 text-xs text-emerald-400 font-mono font-bold flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Sessiya biriktirilgan ({activeStoreSession.phone})</span>
+            </div>
+          ) : (
+            <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/15 text-xs text-limeshade font-mono font-bold">
+              1 ta faol sessiya ulanishi mumkin
+            </div>
+          )}
         </div>
       ) : (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-xs text-amber-600 dark:text-amber-400 font-medium">
@@ -322,340 +350,363 @@ export default function SessionManager() {
         </div>
       )}
 
-      {/* Main Connect Panel */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-100 dark:border-gray-800/80 pb-6">
-          <div>
-            <h2 className="text-xl font-display font-black text-gray-900 dark:text-white flex items-center gap-2">
-              <Smartphone className="w-6 h-6 text-champion dark:text-limeshade" /> Telegram Sessiyasini Ulash (Telethon Engine)
-            </h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Har bir do'kon uchun alohida Telegram akkaunt biriktiriladi</p>
+      {/* Main Connect Panel (OR Store Locked Warning Card) */}
+      {activeStoreSession ? (
+        /* LOCKED STATE: 1 Store - 1 Session Constraint Enforced */
+        <div className="bg-white dark:bg-gray-900 border-2 border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-md text-center space-y-4">
+          <div className="w-14 h-14 bg-emerald-500/10 text-emerald-500 rounded-3xl mx-auto flex items-center justify-center">
+            <ShieldAlert className="w-7 h-7" />
           </div>
-
-          {/* Mode Switcher */}
-          <div className="flex bg-gray-100 dark:bg-gray-950 p-1.5 rounded-2xl border border-gray-200 dark:border-gray-800 text-xs">
-            <button
-              onClick={() => setMode('sms')}
-              className={`px-3.5 py-2 font-bold rounded-xl transition ${
-                mode === 'sms'
-                  ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              SMS / App Kod
-            </button>
-            <button
-              onClick={() => setMode('qr')}
-              className={`px-3.5 py-2 font-bold rounded-xl transition ${
-                mode === 'qr'
-                  ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              QR Kod (100% Onson)
-            </button>
-            <button
-              onClick={() => setMode('string_session')}
-              className={`px-3.5 py-2 font-bold rounded-xl transition ${
-                mode === 'string_session'
-                  ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              StringSession
-            </button>
+          <div>
+            <h3 className="text-xl font-display font-black text-gray-900 dark:text-white">
+              Sessiya Muvaffaqiyatli Ulangan
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">
+              <strong>"{activeStore?.name}"</strong> do'koniga allaqachon faol Telegram sessiyasi (<code className="text-emerald-600 dark:text-emerald-400 font-bold">{activeStoreSession.phone}</code>) ulab bo'lingan.
+            </p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-950 rounded-2xl border border-gray-200/80 dark:border-gray-800 text-xs text-gray-600 dark:text-gray-400 max-w-lg mx-auto font-medium">
+            🔒 <strong>Cheklov:</strong> Har bir do'kon uchun faqat 1 ta aktiv Telegram sessiya ulashingiz mumkin. Yangi sessiya ulash uchun avval pastki jadvaldan mavjudini o'chiring.
           </div>
         </div>
+      ) : (
+        /* CONNECT FORM STATE */
+        <div className="bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 rounded-3xl p-5 sm:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-100 dark:border-gray-800/80 pb-6">
+            <div>
+              <h2 className="text-lg sm:text-xl font-display font-black text-gray-900 dark:text-white flex items-center gap-2">
+                <Smartphone className="w-6 h-6 text-champion dark:text-limeshade" /> Telegram Sessiyasini Ulash
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Har bir do'konga faqat 1 ta alohida Telegram akkaunt ulanadi
+              </p>
+            </div>
 
-        {/* Global Feedback Messages */}
-        {error && (
-          <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-2xl text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{error}</span>
+            {/* Mode Switcher */}
+            <div className="flex bg-gray-100 dark:bg-gray-950 p-1.5 rounded-2xl border border-gray-200 dark:border-gray-800 text-xs w-full sm:w-auto overflow-x-auto">
+              <button
+                onClick={() => setMode('sms')}
+                className={`flex-1 sm:flex-none px-3.5 py-2 font-bold rounded-xl transition whitespace-nowrap ${
+                  mode === 'sms'
+                    ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                SMS / App Kod
+              </button>
+              <button
+                onClick={() => setMode('qr')}
+                className={`flex-1 sm:flex-none px-3.5 py-2 font-bold rounded-xl transition whitespace-nowrap ${
+                  mode === 'qr'
+                    ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                QR Kod (100% Onson)
+              </button>
+              <button
+                onClick={() => setMode('string_session')}
+                className={`flex-1 sm:flex-none px-3.5 py-2 font-bold rounded-xl transition whitespace-nowrap ${
+                  mode === 'string_session'
+                    ? 'bg-champion text-limeshade dark:bg-limeshade dark:text-creole shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                StringSession
+              </button>
+            </div>
           </div>
-        )}
 
-        {success && (
-          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl text-xs flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
+          {/* Global Feedback Messages */}
+          {error && (
+            <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-2xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        {/* MODE 1: SMS / APP OTP */}
-        {mode === 'sms' && (
-          <>
-            {step === 1 && (
-              <form onSubmit={(e) => handleSendCode(e, false)} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">Telegram Telefon Raqamingiz</label>
-                  <div className="flex flex-col sm:flex-row gap-3">
+          {success && (
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl text-xs flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{success}</span>
+            </div>
+          )}
+
+          {/* MODE 1: SMS / APP OTP */}
+          {mode === 'sms' && (
+            <>
+              {step === 1 && (
+                <form onSubmit={(e) => handleSendCode(e, false)} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">Telegram Telefon Raqamingiz</label>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <input
+                        type="text"
+                        className="flex-1 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-limeshade transition"
+                        placeholder="+998901234567"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center justify-center gap-2 transition shadow-md disabled:opacity-50 text-sm hover:scale-[1.02]"
+                      >
+                        {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        Kodni Yuborish
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <label className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCustomApi}
+                        onChange={(e) => setUseCustomApi(e.target.checked)}
+                        className="rounded bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-limeshade focus:ring-limeshade"
+                      />
+                      O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)
+                    </label>
+                  </div>
+
+                  {useCustomApi && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-950 rounded-2xl border border-gray-200 dark:border-gray-800">
+                      <div>
+                        <label className="block text-xs font-mono font-bold text-gray-500 dark:text-gray-400 mb-1">API ID</label>
+                        <input
+                          type="text"
+                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2 text-gray-900 dark:text-gray-100 font-mono text-xs"
+                          value={apiId}
+                          onChange={(e) => setApiId(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-mono font-bold text-gray-500 dark:text-gray-400 mb-1">API HASH</label>
+                        <input
+                          type="text"
+                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2 text-gray-900 dark:text-gray-100 font-mono text-xs"
+                          value={apiHash}
+                          onChange={(e) => setApiHash(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
+                </form>
+              )}
+
+              {step === 2 && (
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="p-4 bg-champion/10 dark:bg-limeshade/10 border border-limeshade/30 text-champion dark:text-limeshade rounded-2xl text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 font-medium">
+                    <span>Telegram ilovangizga (SMS) 5 xonali kod yuborildi!</span>
+                    <button
+                      type="button"
+                      onClick={(e) => handleSendCode(e, true)}
+                      className="text-xs underline font-bold"
+                    >
+                      SMS Orqali Qayta Yuborish
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">SMS / App Tasdiqlash Kodi</label>
                     <input
                       type="text"
-                      className="flex-1 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-limeshade transition"
-                      placeholder="+998901234567"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-limeshade"
+                      placeholder="12345"
+                      maxLength={10}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
                       required
                     />
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white text-xs font-medium"
+                    >
+                      ← Raqamni o'zgartirish
+                    </button>
                     <button
                       type="submit"
                       disabled={loading}
-                      className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center justify-center gap-2 transition shadow-md disabled:opacity-50 text-sm"
+                      className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm hover:scale-[1.02]"
                     >
-                      {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                      Kodni Yuborish
+                      {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                      Sessiyani Boshlash
                     </button>
                   </div>
-                </div>
+                </form>
+              )}
 
-                <div className="pt-2">
-                  <label className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useCustomApi}
-                      onChange={(e) => setUseCustomApi(e.target.checked)}
-                      className="rounded bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-limeshade focus:ring-limeshade"
-                    />
-                    O'zimning shaxsiy API ID & Hash-imni kiritish (my.telegram.org)
-                  </label>
-                </div>
-
-                {useCustomApi && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-950 rounded-2xl border border-gray-200 dark:border-gray-800">
-                    <div>
-                      <label className="block text-xs font-mono font-bold text-gray-500 dark:text-gray-400 mb-1">API ID</label>
-                      <input
-                        type="text"
-                        className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2 text-gray-900 dark:text-gray-100 font-mono text-xs"
-                        value={apiId}
-                        onChange={(e) => setApiId(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-mono font-bold text-gray-500 dark:text-gray-400 mb-1">API HASH</label>
-                      <input
-                        type="text"
-                        className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2 text-gray-900 dark:text-gray-100 font-mono text-xs"
-                        value={apiHash}
-                        onChange={(e) => setApiHash(e.target.value)}
-                        required
-                      />
-                    </div>
+              {step === 3 && (
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-2xl text-xs font-medium">
+                    Hisobingizda 2-Bosqichli Xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting:
                   </div>
-                )}
-              </form>
-            )}
 
-            {step === 2 && (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="p-4 bg-champion/10 dark:bg-limeshade/10 border border-limeshade/30 text-champion dark:text-limeshade rounded-2xl text-xs flex justify-between items-center font-medium">
-                  <span>Telegram ilovangizga (SMS) 5 xonali kod yuborildi!</span>
-                  <button
-                    type="button"
-                    onClick={(e) => handleSendCode(e, true)}
-                    className="text-xs underline font-bold"
-                  >
-                    SMS Orqali Qayta Yuborish
-                  </button>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">SMS / App Tasdiqlash Kodi</label>
-                  <input
-                    type="text"
-                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-limeshade"
-                    placeholder="12345"
-                    maxLength={10}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="flex justify-between items-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep(1)}
-                    className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white text-xs font-medium"
-                  >
-                    ← Raqamni o'zgartirish
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm"
-                  >
-                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
-                    Sessiyani Boshlash
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {step === 3 && (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-2xl text-xs font-medium">
-                  Hisobingizda 2-Bosqichli Xavfsizlik (2FA) yoqilgan. Iltimos 2FA parolingizni kiriting:
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">2FA Parol</label>
-                  <input
-                    type="password"
-                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-limeshade font-mono text-sm"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="flex justify-between items-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep(2)}
-                    className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white text-xs font-medium"
-                  >
-                    ← Orqaga
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-amber-600 text-white font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm"
-                  >
-                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    2FA Bilan Kirish
-                  </button>
-                </div>
-              </form>
-            )}
-          </>
-        )}
-
-        {/* MODE 2: QR CODE SCAN */}
-        {mode === 'qr' && (
-          <div className="flex flex-col items-center justify-center py-6 space-y-4 text-center">
-            {qrLoading ? (
-              <div className="flex flex-col items-center py-8">
-                <RefreshCw className="w-8 h-8 text-champion dark:text-limeshade animate-spin mb-3" />
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-300">QR Kod generatsiya qilinmoqda...</p>
-              </div>
-            ) : qrUrl ? (
-              <>
-                <div className="p-4 bg-white rounded-3xl shadow-xl inline-block border-4 border-champion dark:border-limeshade">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}`}
-                    alt="Telegram QR Login"
-                    className="w-60 h-60"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-sm font-bold font-display text-gray-900 dark:text-white flex items-center justify-center gap-2">
-                    <QrCode className="w-4 h-4 text-champion dark:text-limeshade" />
-                    Telegram Ilovangizda QR Kodni Skan Qiling
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Smartfoningizda: <strong className="text-champion dark:text-limeshade">Settings → Devices → Link Desktop Device</strong>
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <a
-                    href={qrUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl flex items-center gap-1.5 transition font-bold border border-gray-200 dark:border-gray-700"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" /> Telegram Ilovasida Ochish
-                  </a>
-                  <button
-                    onClick={handleStartQr}
-                    className="text-xs text-champion dark:text-limeshade font-bold flex items-center gap-1 hover:underline"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" /> QR Kodni Yangilash
-                  </button>
-                </div>
-
-                {qr2faRequired && (
-                  <form onSubmit={handleQr2faSubmit} className="w-full max-w-sm pt-4 space-y-3">
-                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-600 dark:text-amber-400 text-xs font-medium">
-                      2FA Parolingizni kiriting:
-                    </div>
+                  <div>
+                    <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">2FA Parol</label>
                     <input
                       type="password"
-                      className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-limeshade text-xs font-mono"
-                      placeholder="2FA Parolingiz"
-                      value={qrPassword}
-                      onChange={(e) => setQrPassword(e.target.value)}
+                      className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-limeshade font-mono text-sm"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
                     />
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white text-xs font-medium"
+                    >
+                      ← Orqaga
+                    </button>
                     <button
                       type="submit"
-                      className="w-full bg-amber-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                      disabled={loading}
+                      className="bg-amber-600 text-white font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm"
                     >
-                      2FA Bilan Tasdiqlash
+                      {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                      2FA Bilan Kirish
                     </button>
-                  </form>
-                )}
-              </>
-            ) : (
-              <button
-                onClick={handleStartQr}
-                className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md"
-              >
-                <QrCode className="w-4 h-4" /> QR Kod Yaratish
-              </button>
-            )}
-          </div>
-        )}
+                  </div>
+                </form>
+              )}
+            </>
+          )}
 
-        {/* MODE 3: STRING SESSION IMPORT */}
-        {mode === 'string_session' && (
-          <form onSubmit={handleImportStringSession} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">Telefon Raqam</label>
-                <input
-                  type="text"
-                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-xs"
-                  placeholder="+998901234567"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">StringSession Kodingiz</label>
-                <input
-                  type="text"
-                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-xs"
-                  placeholder="1BJW9... (Telethon StringSession)"
-                  value={sessionStringInput}
-                  onChange={(e) => setSessionStringInput(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
+          {/* MODE 2: QR CODE SCAN */}
+          {mode === 'qr' && (
+            <div className="flex flex-col items-center justify-center py-6 space-y-4 text-center">
+              {qrLoading ? (
+                <div className="flex flex-col items-center py-8">
+                  <RefreshCw className="w-8 h-8 text-champion dark:text-limeshade animate-spin mb-3" />
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300">QR Kod generatsiya qilinmoqda...</p>
+                </div>
+              ) : qrUrl ? (
+                <>
+                  <div className="p-4 bg-white rounded-3xl shadow-xl inline-block border-4 border-champion dark:border-limeshade">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}`}
+                      alt="Telegram QR Login"
+                      className="w-52 h-52 sm:w-60 sm:h-60"
+                    />
+                  </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm"
-              >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />}
-                StringSession Ulash
-              </button>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold font-display text-gray-900 dark:text-white flex items-center justify-center gap-2">
+                      <QrCode className="w-4 h-4 text-champion dark:text-limeshade" />
+                      Telegram Ilovangizda QR Kodni Skan Qiling
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Smartfoningizda: <strong className="text-champion dark:text-limeshade">Settings → Devices → Link Desktop Device</strong>
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <a
+                      href={qrUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl flex items-center gap-1.5 transition font-bold border border-gray-200 dark:border-gray-700"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Telegram Ilovasida Ochish
+                    </a>
+                    <button
+                      onClick={handleStartQr}
+                      className="text-xs text-champion dark:text-limeshade font-bold flex items-center gap-1 hover:underline"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> QR Kodni Yangilash
+                    </button>
+                  </div>
+
+                  {qr2faRequired && (
+                    <form onSubmit={handleQr2faSubmit} className="w-full max-w-sm pt-4 space-y-3">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-600 dark:text-amber-400 text-xs font-medium">
+                        2FA Parolingizni kiriting:
+                      </div>
+                      <input
+                        type="password"
+                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-limeshade text-xs font-mono"
+                        placeholder="2FA Parolingiz"
+                        value={qrPassword}
+                        onChange={(e) => setQrPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="submit"
+                        className="w-full bg-amber-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                      >
+                        2FA Bilan Tasdiqlash
+                      </button>
+                    </form>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={handleStartQr}
+                  className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md hover:scale-105"
+                >
+                  <QrCode className="w-4 h-4" /> QR Kod Yaratish
+                </button>
+              )}
             </div>
-          </form>
-        )}
-      </div>
+          )}
+
+          {/* MODE 3: STRING SESSION IMPORT */}
+          {mode === 'string_session' && (
+            <form onSubmit={handleImportStringSession} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">Telefon Raqam</label>
+                  <input
+                    type="text"
+                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-xs"
+                    placeholder="+998901234567"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5">StringSession Kodingiz</label>
+                  <input
+                    type="text"
+                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-3 text-gray-900 dark:text-gray-100 font-mono text-xs"
+                    placeholder="1BJW9... (Telethon StringSession)"
+                    value={sessionStringInput}
+                    onChange={(e) => setSessionStringInput(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-md disabled:opacity-50 text-sm hover:scale-[1.02]"
+                >
+                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />}
+                  StringSession Ulash
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
 
       {/* Active Sessions List */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 rounded-3xl p-6 sm:p-8 shadow-sm">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 rounded-3xl p-5 sm:p-8 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h3 className="text-lg font-display font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -699,7 +750,7 @@ export default function SessionManager() {
                 </div>
 
                 <div className="flex items-center gap-2 self-end sm:self-center">
-                  {activeStore && s.store_id !== activeStore.id && (
+                  {activeStore && s.store_id !== activeStore.id && !activeStoreSession && (
                     <button
                       onClick={() => handleBindSession(s.id)}
                       className="bg-champion dark:bg-limeshade text-limeshade dark:text-creole text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 transition shadow-sm"
@@ -711,7 +762,7 @@ export default function SessionManager() {
 
                   <button
                     onClick={() => handleDeleteSession(s.id)}
-                    className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 p-2 rounded-xl transition hover:bg-rose-500/20"
+                    className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 p-2.5 rounded-xl transition hover:bg-rose-500/20"
                     title="Sessiyani o'chirish"
                   >
                     <Trash2 className="w-4 h-4" />
